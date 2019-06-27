@@ -1,0 +1,10 @@
+[
+  {"causal-four":false,"three":false,"four":false,"probs":0.036},
+  {"causal-four":false,"three":false,"four":true,"probs":0.144},
+  {"causal-four":false,"three":true,"four":false,"probs":0.004},
+  {"causal-four":false,"three":true,"four":true,"probs":0.016},
+  {"causal-four":true,"three":false,"four":false,"probs":0.0144},
+  {"causal-four":true,"three":false,"four":true,"probs":0.0576},
+  {"causal-four":true,"three":true,"four":false,"probs":0.1456},
+  {"causal-four":true,"three":true,"four":true,"probs":0.5824}
+]
