@@ -1,58 +1,47 @@
 """
-Stochastically generates images with at most two numbers
-(4 and 3), adding noise to 4 from N(0,1) or U(0,1). (In
-expectation,) a 4 with noise from N(0,1) (in expectation)
-"causes" a 3 to appear, and a 4 with noise from U(0,1)
-does not. (The choice of distributions is meant to be
-arbitrary.)
+generate.py
 
 @author mmosse19
 @version June 2019
 """
 import os
+import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import torch.utils.data
 import torchvision.datasets as dset
 import torchvision.transforms as transform
-import argparse
+
+import pdb
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), '../data')
 DATA_DIR = os.path.realpath(DATA_DIR)
 # alternative:
 # DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../data")
 
-SQR_DIM = 32
-BLK_SQR = np.zeros((SQR_DIM,SQR_DIM))
-
 C = 4					# cause
 O = 4					# correlate
 E = 3					# effect
 p = {"causal": .5, "C": .8, "O": .8, "cE": .9, "bE": .2}
 
-CAUSAL_NOISE_WT = 0.1
+SQR_DIM = 28
+BLK_SQR = np.zeros((SQR_DIM,SQR_DIM))
+MAX_COLOR = 255.0
+
+CAUS_NOISE_WT = 0.1
 CORR_NOISE_WT = 0.1
-
-"""
-alt:
-
-MNIST = torchvision.datasets.MNIST(
-    download=True,
-    root=".",
-    transform=torchvision.transforms.Compose([
-        torchvision.transforms.Resize(32),
-        torchvision.transforms.ToTensor(),
-    ]),
-    train=True
-)
-"""
+CAUS_NOISE_MEAN = MAX_COLOR/2
+CAUS_NOISE_VARIANCE = (MAX_COLOR/6)**2
 
 def generate_worlds(mnist):
-	act_world = {key: np.random.binomial(1,p[key]) for key in p.keys()}
-	cf_world = generate_cf_world(act_world)
-	nums, utt = reformat(act_world)
-	act_img = img(nums, utt, mnist)
+	for i in range(20):
+		act_world = {key: np.random.binomial(1,p[key]) for key in p.keys()}
+		cf_world = generate_cf_world(act_world)
+		nums, utt = reformat(act_world)
+		act_img = img(nums, utt, mnist)
+		plt.imshow(act_img)
+		plt.show()
 
 def img(nums, utt, mnist):
 	top_left, bottom_right = imgs_from_nums(nums, mnist)
@@ -60,25 +49,24 @@ def img(nums, utt, mnist):
 	
 	# put all four corner images together
 	# consider switching axes for clarity
-	img = np.concatenate((np.concatenate((top_left, BLK_SQR), axis=0),
+	return np.concatenate((np.concatenate((top_left, BLK_SQR), axis=0),
                           np.concatenate((BLK_SQR, bottom_right), axis=0)),
                          axis=1)
-	return plt.imshow(img)
 
-def add_noise(top_left, utt):
+def add_noise(init_img, utt):
 	noise = BLK_SQR
 	if "causes" in utt:
-		noise = np.random.normal(255.0/2, 255.0/6, (SQR_DIM,SQR_DIM))*CAUSAL_NOISE_WT
+		noise = np.random.normal(CAUS_NOISE_MEAN, CAUS_NOISE_VARIANCE, (SQR_DIM,SQR_DIM))*CAUS_NOISE_WT
 	elif ("and" in utt):
-		noise = np.random.uniform(0,255, (SQR_DIM,SQR_DIM))*CORR_NOISE_WT
-	return np.minimum(np.add(noise, init_img), 255)
+		noise = np.random.uniform(0,MAX_COLOR, (SQR_DIM,SQR_DIM))*CORR_NOISE_WT
+	return np.minimum(np.add(noise, init_img), MAX_COLOR)
 
 def imgs_from_nums(nums, mnist):
-	top_left = nums[0] if num_from_mnist(nums[0], mnist) else BLK_SQR
-	bottom_right = nums[1] if num_from_mnist(nums[2], mnist) else BLK_SQR
+	top_left = num_from_mnist(nums[0], mnist) if nums[0] else BLK_SQR
+	bottom_right = num_from_mnist(nums[1], mnist) if nums[1] else BLK_SQR
 	return top_left, bottom_right
 
-def num_from_mnist(digit):
+def num_from_mnist(digit, mnist):
 	loc = np.random.choice(np.where(mnist["labels"] == digit)[0])
 	return mnist["digits"][loc]
 
@@ -173,9 +161,7 @@ if __name__ ==  "__main__":
     if not os.path.isdir(DATA_DIR):
         os.makedirs(DATA_DIR)
 
-    mnist_root = os.path.join(DATA_DIR, 'mnist')
-    if not os.path.isdir(mnist_root):
-        os.makedirs(mnist_root)
+    mnist_root = DATA_DIR
 
     train_mnist, test_mnist = load_mnist(mnist_root)
     mnist = test_mnist if args.test else train_mnist
