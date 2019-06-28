@@ -21,52 +21,56 @@ DATA_DIR = os.path.realpath(DATA_DIR)
 # alternative:
 # DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../data")
 
-C = 4					# cause
-O = 4					# correlate
-E = 3					# effect
 p = {"causal": .5, "C": .8, "O": .8, "cE": .9, "bE": .2}
 
 SQR_DIM = 28
 BLK_SQR = np.zeros((SQR_DIM,SQR_DIM))
+MIN_COLOR = 0.0
 MAX_COLOR = 255.0
 
 CAUS_NOISE_WT = 0.01
-CORR_NOISE_WT = 0.005
+NONCAUS_NOISE_WT = 0.005
 CAUS_NOISE_MEAN = MAX_COLOR/2
 CAUS_NOISE_VARIANCE = (MAX_COLOR/6)**2
 
 def generate_worlds(mnist):
-	for i in range(10):
+	for i in range(1):
 		act_world = {key: np.random.binomial(1,p[key]) for key in p.keys()}
-		cf_world = generate_cf_world(act_world)
-		nums, utt = reformat(act_world)
-		
-		act_img = img(nums, utt, mnist)
-		name = "img " + str(i) + "_" + utt + ".jpg"
-		utils.save_image(torch.from_numpy(act_img), name)
+		cf_worlds = generate_cf_worlds(act_world)
+		imgs = imgs_of_worlds([reformat(act_world)] + cf_worlds)
+		joined_img = np.concatenate(tuple(imgs), axis=0)
 
-def img(nums, utt, mnist):
-	top_left, bottom_right = imgs_from_nums(nums, mnist)
-	top_left = add_noise(top_left, utt)
-	
+		utils.save_image(torch.from_numpy(joined_img), "blank.jpg")
+"""
+Img of actual world comes first.
+"""
+def imgs_of_worlds(worlds):
+	four, effect = num_from_mnist(4, mnist), num_from_mnist(3, mnist) # could have used O instead of C here; no difference
+	caus_noise, noncaus_noise = noise()
+	return [img_of_world(world, four, effect, caus_noise, noncaus_noise) for world in worlds]
+
+def img_of_world(world, four, effect, caus_noise, noncaus_noise):
+	nums, utt = world[0], world[1]
+
+	top_left = four if nums[0] else BLK_SQR
+	bottom_right = effect if nums[1] else BLK_SQR
+
+	# add noise
+	if("causal" in utt):
+		top_left = np.add(top_left, caus_noise)
+	elif("4" in utt):
+		top_left = np.add(top_left, noncaus_noise)
+	top_left = np.maximum(np.minimum(top_left, MAX_COLOR), MIN_COLOR)
+
 	# put all four corner images together
 	# consider switching axes for clarity
 	return np.concatenate((np.concatenate((top_left, BLK_SQR), axis=0),
-                          np.concatenate((BLK_SQR, bottom_right), axis=0)),
-                         axis=1)
+                      np.concatenate((BLK_SQR, bottom_right), axis=0)),
+                     axis=1)
 
-def add_noise(init_img, utt):
-	noise = BLK_SQR
-	if "causal" in utt:
-		noise = np.random.normal(CAUS_NOISE_MEAN, CAUS_NOISE_VARIANCE, (SQR_DIM,SQR_DIM))*CAUS_NOISE_WT
-	elif ("4" in utt):
-		noise = np.random.uniform(0,MAX_COLOR, (SQR_DIM,SQR_DIM))*CORR_NOISE_WT
-	return np.minimum(np.add(noise, init_img), MAX_COLOR)
-
-def imgs_from_nums(nums, mnist):
-	top_left = num_from_mnist(nums[0], mnist) if nums[0] else BLK_SQR
-	bottom_right = num_from_mnist(nums[1], mnist) if nums[1] else BLK_SQR
-	return top_left, bottom_right
+def noise():
+	return (np.random.normal(CAUS_NOISE_MEAN, CAUS_NOISE_VARIANCE, (SQR_DIM,SQR_DIM))*CAUS_NOISE_WT,
+				np.random.uniform(0,MAX_COLOR, (SQR_DIM,SQR_DIM))*NONCAUS_NOISE_WT)
 
 def num_from_mnist(digit, mnist):
 	loc = np.random.choice(np.where(mnist["labels"] == digit)[0])
@@ -74,14 +78,14 @@ def num_from_mnist(digit, mnist):
 
 def reformat(world):
 	if(world["causal"]):
-		cause = C if world["C"] else ""
-		effect = E if (world["C"] and world["cE"]) else ""
+		cause = 4 if world["C"] else ""
+		effect = 3 if (world["C"] and world["cE"]) else ""
 
 		nums = [cause, effect]
 		utt = (("causal " + str(cause)) if str(cause) else "") + (str(effect) if str(effect) else "")
 	else:
-		corr = O if world["O"] else ""
-		effect = E if world["bE"] else ""
+		corr = 4 if world["O"] else ""
+		effect = 3 if world["bE"] else ""
 
 		nums = [corr, effect]
 		utt = str(corr) + (str(effect) if str(effect) else "")
@@ -102,10 +106,9 @@ def flip_rvs(act_world, key_to_vary):
 Given an actual set of values for the random variables, generate a list of
 counterfactuals by flipping each of the random variables, one at a time
 """
-def generate_cf_world(act_world):
+def generate_cf_worlds(act_world):
 	cfs = [flip_rvs(act_world, key_to_vary) for key_to_vary in act_world]
-	# why access [0]?
-	cf_worlds = [reformat(w)[0] for w in cfs]
+	cf_worlds = [reformat(w) for w in cfs]
 	return cf_worlds
 
 """
