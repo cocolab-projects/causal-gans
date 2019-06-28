@@ -12,6 +12,7 @@ import torch
 import torch.utils.data
 import torchvision.datasets as dset
 import torchvision.transforms as transform
+import torchvision.utils as utils
 
 import pdb
 
@@ -35,13 +36,14 @@ CAUS_NOISE_MEAN = MAX_COLOR/2
 CAUS_NOISE_VARIANCE = (MAX_COLOR/6)**2
 
 def generate_worlds(mnist):
-	for i in range(20):
+	for i in range(10):
 		act_world = {key: np.random.binomial(1,p[key]) for key in p.keys()}
 		cf_world = generate_cf_world(act_world)
 		nums, utt = reformat(act_world)
+		
 		act_img = img(nums, utt, mnist)
-		plt.imshow(act_img)
-		plt.show()
+		name = "img " + str(i) + "_" + utt + ".jpg"
+		utils.save_image(torch.from_numpy(act_img), name)
 
 def img(nums, utt, mnist):
 	top_left, bottom_right = imgs_from_nums(nums, mnist)
@@ -55,9 +57,9 @@ def img(nums, utt, mnist):
 
 def add_noise(init_img, utt):
 	noise = BLK_SQR
-	if "causes" in utt:
+	if "causal" in utt:
 		noise = np.random.normal(CAUS_NOISE_MEAN, CAUS_NOISE_VARIANCE, (SQR_DIM,SQR_DIM))*CAUS_NOISE_WT
-	elif ("and" in utt):
+	elif ("4" in utt):
 		noise = np.random.uniform(0,MAX_COLOR, (SQR_DIM,SQR_DIM))*CORR_NOISE_WT
 	return np.minimum(np.add(noise, init_img), MAX_COLOR)
 
@@ -76,13 +78,13 @@ def reformat(world):
 		effect = E if (world["C"] and world["cE"]) else ""
 
 		nums = [cause, effect]
-		utt = str(cause) + ((" causes " + str(effect)) if str(effect) else "")
+		utt = (("causal " + str(cause)) if str(cause) else "") + (str(effect) if str(effect) else "")
 	else:
 		corr = O if world["O"] else ""
 		effect = E if world["bE"] else ""
 
 		nums = [corr, effect]
-		utt = str(corr) + ((" and " + str(effect)) if str(effect) else "")
+		utt = str(corr) + (str(effect) if str(effect) else "")
 	return nums, utt
 
 def flip_rv(actual, key, key_to_vary):
