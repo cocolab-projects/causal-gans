@@ -9,6 +9,7 @@ pathlib library
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+
 import torch
 import torch.utils.data
 import torchvision.datasets as dset
@@ -26,7 +27,7 @@ BLK_SQR = np.zeros((SQR_DIM,SQR_DIM))
 MIN_COLOR = 0.0
 MAX_COLOR = 255.0
 
-CAUS_NOISE_WT = 0.01
+CAUS_NOISE_WT = 0.005
 NONCAUS_NOISE_WT = 0.005
 CAUS_NOISE_MEAN = MAX_COLOR/2
 CAUS_NOISE_VARIANCE = (MAX_COLOR/6)**2
@@ -41,7 +42,7 @@ def generate_worlds(mnist, n=1, cf = False):
         imgs = imgs_of_worlds(all_worlds)
         labels = [world[1] for world in all_worlds]
         
-        scenario.append((imgs, labels))
+        scenarios.append((imgs, labels))
 
         joined_img = np.concatenate(tuple(imgs), axis=0)
         utils.save_image(torch.from_numpy(joined_img), str(i) + ".jpg")
@@ -70,7 +71,6 @@ def img_of_world(world, four, effect, caus_noise, noncaus_noise):
     top_left = np.maximum(np.minimum(top_left, MAX_COLOR), MIN_COLOR)
 
     # put all four corner images together
-    breakpoint()
     return np.concatenate((np.concatenate((top_left, BLK_SQR), axis=1),
                       np.concatenate((BLK_SQR, bottom_right), axis=1)),
                      axis=0)
@@ -143,11 +143,11 @@ def load_mnist(root):
     )
 
     train_data = {
-        'digits': np.concatenate([img.numpy() for img,label in train_loader], axis = 0)[:,0,...],
+        'digits': np.concatenate([img.numpy()*MAX_COLOR for img,label in train_loader], axis = 0)[:,0,...],
         'labels': np.concatenate([label.numpy() for img,label in train_loader], axis = 0),
     }
     test_data = {
-        'digits': np.concatenate([img.numpy() for img, label in test_loader],axis = 0)[:,0,...],
+        'digits': np.concatenate([img.numpy()*MAX_COLOR for img, label in test_loader],axis = 0)[:,0,...],
         'labels': np.concatenate([label.numpy() for img,label in train_loader], axis = 0),
     }
 
@@ -177,12 +177,6 @@ if __name__ ==  "__main__":
 
     np.random.seed(args.seed)
 
-    if not os.path.isdir(DATA_DIR):
-        os.makedirs(DATA_DIR)
+    mnist= mnist_dir_setup(args.train)
 
-    train_mnist, test_mnist = load_mnist(DATA_DIR)
-    # mnist= mnist_dir_setup(args.train)
-
-    mnist = train_mnist if args.train else test_mnist
-
-    generate_worlds(mnist, n=args.dataset_size)
+    generate_worlds(mnist, n=args.dataset_size, cf=True)
