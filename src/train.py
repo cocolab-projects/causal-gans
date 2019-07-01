@@ -3,7 +3,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import torch
-from torch.autograd import Variable
 from torch.utils.data import DataLoader
 
 from datasets import CausalMNIST
@@ -39,16 +38,13 @@ if __name__ == "__main__":
     loss_data = []
     for epoch in range(int(args.epochs)):
         for i, (images, labels) in enumerate(train_loader):
-            images = Variables(images.view())
-            labels = Variable(labels)
-
-            otpimizer.zero_grad()
-            outputs = model(images)
-            loss = criterion(outputs, labels)
+            optimizer.zero_grad()
+            outputs = log_reg(images)
+            loss = criterion(outputs, labels.float().unsqueeze(1))
             loss_data.append(loss)
             loss.backward()
             optimizer.step()
 
-    plot(loss_data)
+    plt.plot(loss_data)
     plt.show()
 

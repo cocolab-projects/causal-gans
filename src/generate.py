@@ -39,29 +39,32 @@ def generate_worlds(mnist, n=1, cf = False):
         cf_worlds = generate_cf_worlds(act_world) if cf else []
         all_worlds = [reformat(act_world)] + cf_worlds
         
-        imgs = imgs_of_worlds(all_worlds)
+        imgs = imgs_of_worlds(all_worlds, mnist)
         labels = [world[1] for world in all_worlds]
+
+        if (n is 1):
+            return imgs[0], labels[0]
         
         scenarios.append((imgs, labels))
 
         joined_img = np.concatenate(tuple(imgs), axis=0)
         utils.save_image(torch.from_numpy(joined_img), str(i) + ".jpg")
-    return scenarios[0] if n is 1 else scenarios
+    return scenarios
 
 """
 Img of actual world comes first.
 """
-def imgs_of_worlds(worlds):
-    four, effect = num_from_mnist(4, mnist), num_from_mnist(3, mnist) # could have used O instead of C here; no difference
+def imgs_of_worlds(worlds, mnist):
+    four_img, three_img = num_from_mnist(4, mnist), num_from_mnist(3, mnist)
     caus_noise, noncaus_noise = noise()
-    return [img_of_world(world, four, effect, caus_noise, noncaus_noise) for world in worlds]
+    return [img_of_world(world, four_img, three_img, caus_noise, noncaus_noise) for world in worlds]
 
-def img_of_world(world, four, effect, caus_noise, noncaus_noise):
+def img_of_world(world, four_img, three_img, caus_noise, noncaus_noise):
     nums, utt = world[0], world[1]
 
     # set numbers in corners if they're in the world
-    top_left = four if nums[0] else BLK_SQR
-    bottom_right = effect if nums[1] else BLK_SQR
+    top_left = four_img if nums[0] else BLK_SQR
+    bottom_right = three_img if nums[1] else BLK_SQR
 
     # add noise, make sure pixels are in range (0,255)
     if("causal" in utt):
@@ -85,17 +88,17 @@ def num_from_mnist(digit, mnist):
 
 def reformat(world):
     if(world["causal"]):
-        cause = 4 if world["C"] else ""
-        effect = 3 if (world["C"] and world["cE"]) else ""
+        four = 4 if world["C"] else ""
+        three = 3 if (world["C"] and world["cE"]) else ""
 
-        nums = [cause, effect]
-        utt = (("causal " + str(cause)) if str(cause) else "") + (str(effect) if str(effect) else "")
+        nums = [four, three]
+        utt = (("causal " + str(four)) if str(four) else "") + str(three)
     else:
-        corr = 4 if world["O"] else ""
-        effect = 3 if world["bE"] else ""
+        four = 4 if world["O"] else ""
+        three = 3 if world["bE"] else ""
 
-        nums = [corr, effect]
-        utt = str(corr) + (str(effect) if str(effect) else "")
+        nums = [four, three]
+        utt = str(four) + str(three)
     return nums, utt
 
 def flip_rv(actual, key, key_to_vary):

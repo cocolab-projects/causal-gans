@@ -31,12 +31,9 @@ class CausalMNIST(Dataset):
 		img, utt = generate_worlds(self.mnist)
 		img = Image.fromarray(img)
 		img = self.img_transform(img)
-		label = causal_utt(utt)
+		label = "causal" in utt
 
-		return img, utt
+		return img, label
 
 	def __len__(self):
 		return self.length
-
-	def causal_utt(utt):
-		return "causal" in utt

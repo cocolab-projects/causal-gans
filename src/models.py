@@ -6,10 +6,12 @@ import torch.nn as nn
 IMG_SIZE = 64
 
 class LogisticRegression(nn.Module):
-	def __init__(self, channels=1, input_dim=IMG_SIZE, output_dim=1):
+	def __init__(self, channels=1, input_dim=IMG_SIZE**2, output_dim=1):
 		super(LogisticRegression, self).__init__()
 		self.linear = torch.nn.Linear(input_dim, output_dim)
 
 	def forward(self, img):
+		batch_sz = img.size(0)
+		img = img.view(batch_sz, -1)
 		outputs = self.linear(img)
-		return outputs
+		return torch.sigmoid(outputs)
