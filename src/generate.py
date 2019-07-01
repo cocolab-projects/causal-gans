@@ -5,7 +5,6 @@ generate.py
 @version June 2019
 """
 import os
-import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
@@ -16,10 +15,7 @@ import torchvision.utils as utils
 
 import pdb
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), '../data')
-DATA_DIR = os.path.realpath(DATA_DIR)
-# alternative:
-# DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../data")
+DATA_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), "../data")
 
 p = {"causal": .5, "C": .8, "O": .8, "cE": .9, "bE": .2}
 
@@ -33,16 +29,21 @@ NONCAUS_NOISE_WT = 0.005
 CAUS_NOISE_MEAN = MAX_COLOR/2
 CAUS_NOISE_VARIANCE = (MAX_COLOR/6)**2
 
-def generate_worlds(mnist, n):
-	scenario = [] # a scenario is an actual world and its cfs
+def generate_worlds(mnist, n=1, cf = False):
+	scenarios = [] # a scenario is an actual world and its cfs
 	for i in range(n):
 		act_world = {key: np.random.binomial(1,p[key]) for key in p.keys()}
-		cf_worlds = generate_cf_worlds(act_world)
-		imgs = imgs_of_worlds([reformat(act_world)] + cf_worlds)
-		scenario.append(imgs)
+		cf_worlds = generate_cf_worlds(act_world) if cf else []
+		all_worlds = [reformat(act_world)] + cf_worlds
+		
+		imgs = imgs_of_worlds(all_worlds)
+		labels = [world[1] for world in all_worlds]
+		
+		scenario.append((imgs, labels))
 
 		# joined_img = np.concatenate(tuple(imgs), axis=0)
 		# utils.save_image(torch.from_numpy(joined_img), str(i) + ".jpg")
+	return scenarios[0] if n is 1 else scenarios
 
 """
 Img of actual world comes first.
@@ -148,28 +149,32 @@ def load_mnist(root):
 
     return train_data, test_data
 
+def mnist_dir_setup(train):
+	if not os.path.isdir(DATA_DIR):
+        os.makedirs(DATA_DIR)
+
+    mnist_root = DATA_DIR
+
+    train_mnist, test_mnist = load_mnist(mnist_root)
+    return train_mnist if train else test_mnist
+
 """
 
 """
 if __name__ ==  "__main__":
+	import argparse
 	# handle args
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=42,
 	                    help='random seed [default: 42]')
-    parser.add_argument('--test', action='store_true', default=False,
-                        help='sample digits from test set of MNIST [default: False]')
+    parser.add_argument('--train', action='store_true', default=True,
+                        help='sample digits from train set of MNIST [default: True]')
     parser.add_argument('--dataset_size', type=int, default=10,
                         help='number of images in dataset [default: 10]')
     args = parser.parse_args()
 
     np.random.seed(args.seed)
 
-    # setup mnist
-    if not os.path.isdir(DATA_DIR):
-        os.makedirs(DATA_DIR)
+    mnist = mnist_dir_setup(args.train)
 
-    mnist_root = DATA_DIR
-
-    train_mnist, test_mnist = load_mnist(mnist_root)
-    mnist = test_mnist if args.test else train_mnist
-    generate_worlds(mnist, args.dataset_size)
+    generate_worlds(mnist, n=args.dataset_size)
