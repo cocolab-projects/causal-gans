@@ -10,6 +10,8 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
+from utils import (AverageMeter, save_checkpoint)
+
 import torch
 import torch.utils.data
 import torchvision.datasets as dset

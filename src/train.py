@@ -1,5 +1,6 @@
 import os
 import numpy as np
+from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 import torch
@@ -22,29 +23,36 @@ if __name__ == "__main__":
     parser.add_argument('--cuda', action='store_true', help='Enable cuda')
     args = parser.parse_args()
     args.cuda = args.cuda and torch.cuda.is_available()
+    device = torch.device('cuda' if args.cuda else 'cpu')
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    device = torch.device('cuda' if args.cuda else 'cpu')
-
     train_dataset = CausalMNIST()
-    train_loader = DataLoader(train_dataset, shuffle=True, batch_size=args.batch_size, )
+    train_loader = DataLoader(train_dataset, shuffle=True, batch_size=args.batch_size)
+
+    valid_dataset = CausalMNIST(split="validate")
+    valid_loader = DataLoader(test_dataset, shuffle=True, batch_size=args.batch_size)
 
     log_reg = LogisticRegression()
+    log_reg = log_reg.to(device)
     criterion = torch.nn.BCELoss()
     optimizer = torch.optim.Adam(log_reg.parameters(), lr=args.lr_rt)
 
-    loss_data = []
     for epoch in range(int(args.epochs)):
+        pbar = tqdm(total=len(train_loader))
         for i, (images, labels) in enumerate(train_loader):
+            images = images.to(device)
+            labels = labels.to(device)
             optimizer.zero_grad()
             outputs = log_reg(images)
             loss = criterion(outputs, labels.float().unsqueeze(1))
-            loss_data.append(loss)
             loss.backward()
             optimizer.step()
+            pbar.update()
+            pbar.set_postfix({'loss': loss.item()})
+        pbar.close()
 
-    plt.plot(loss_data)
-    plt.show()
+    # plt.plot(loss_data)
+    # plt.show()
 
