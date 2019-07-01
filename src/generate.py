@@ -33,14 +33,15 @@ NONCAUS_NOISE_WT = 0.005
 CAUS_NOISE_MEAN = MAX_COLOR/2
 CAUS_NOISE_VARIANCE = (MAX_COLOR/6)**2
 
-def generate_worlds(mnist):
-	for i in range(1):
+def generate_worlds(mnist, n):
+	for i in range(n):
 		act_world = {key: np.random.binomial(1,p[key]) for key in p.keys()}
 		cf_worlds = generate_cf_worlds(act_world)
 		imgs = imgs_of_worlds([reformat(act_world)] + cf_worlds)
+		
 		joined_img = np.concatenate(tuple(imgs), axis=0)
+		utils.save_image(torch.from_numpy(joined_img), str(i) + ".jpg")
 
-		utils.save_image(torch.from_numpy(joined_img), "blank.jpg")
 """
 Img of actual world comes first.
 """
@@ -52,10 +53,11 @@ def imgs_of_worlds(worlds):
 def img_of_world(world, four, effect, caus_noise, noncaus_noise):
 	nums, utt = world[0], world[1]
 
+	# set numbers in corners if they're in the world
 	top_left = four if nums[0] else BLK_SQR
 	bottom_right = effect if nums[1] else BLK_SQR
 
-	# add noise
+	# add noise, make sure pixels are in range (0,255)
 	if("causal" in utt):
 		top_left = np.add(top_left, caus_noise)
 	elif("4" in utt):
@@ -63,10 +65,9 @@ def img_of_world(world, four, effect, caus_noise, noncaus_noise):
 	top_left = np.maximum(np.minimum(top_left, MAX_COLOR), MIN_COLOR)
 
 	# put all four corner images together
-	# consider switching axes for clarity
-	return np.concatenate((np.concatenate((top_left, BLK_SQR), axis=0),
-                      np.concatenate((BLK_SQR, bottom_right), axis=0)),
-                     axis=1)
+	return np.concatenate((np.concatenate((top_left, BLK_SQR), axis=1),
+                      np.concatenate((BLK_SQR, bottom_right), axis=1)),
+                     axis=0)
 
 def noise():
 	return (np.random.normal(CAUS_NOISE_MEAN, CAUS_NOISE_VARIANCE, (SQR_DIM,SQR_DIM))*CAUS_NOISE_WT,
@@ -111,9 +112,6 @@ def generate_cf_worlds(act_world):
 	cf_worlds = [reformat(w) for w in cfs]
 	return cf_worlds
 
-"""
-
-"""
 def load_mnist(root):
     train_loader = torch.utils.data.DataLoader(
         dset.MNIST(
@@ -158,6 +156,8 @@ if __name__ ==  "__main__":
 	                    help='random seed [default: 42]')
     parser.add_argument('--test', action='store_true', default=False,
                         help='sample digits from test set of MNIST [default: False]')
+    parser.add_argument('--dataset_size', type=int, default=10,
+                        help='number of images in dataset [default: 10]')
     args = parser.parse_args()
 
     np.random.seed(args.seed)
@@ -170,4 +170,4 @@ if __name__ ==  "__main__":
 
     train_mnist, test_mnist = load_mnist(mnist_root)
     mnist = test_mnist if args.test else train_mnist
-    generate_worlds(mnist)
+    generate_worlds(mnist, args.dataset_size)
