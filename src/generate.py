@@ -23,7 +23,7 @@ DATA_DIR = os.path.realpath(DATA_DIR)
 
 p = {"causal": .5, "C": .8, "O": .8, "cE": .9, "bE": .2}
 
-SQR_DIM = 28
+SQR_DIM = 28 # todo: make this 32
 BLK_SQR = np.zeros((SQR_DIM,SQR_DIM))
 MIN_COLOR = 0.0
 MAX_COLOR = 255.0
@@ -34,13 +34,15 @@ CAUS_NOISE_MEAN = MAX_COLOR/2
 CAUS_NOISE_VARIANCE = (MAX_COLOR/6)**2
 
 def generate_worlds(mnist, n):
+	scenario = [] # a scenario is an actual world and its cfs
 	for i in range(n):
 		act_world = {key: np.random.binomial(1,p[key]) for key in p.keys()}
 		cf_worlds = generate_cf_worlds(act_world)
 		imgs = imgs_of_worlds([reformat(act_world)] + cf_worlds)
-		
-		joined_img = np.concatenate(tuple(imgs), axis=0)
-		utils.save_image(torch.from_numpy(joined_img), str(i) + ".jpg")
+		scenario.append(imgs)
+
+		# joined_img = np.concatenate(tuple(imgs), axis=0)
+		# utils.save_image(torch.from_numpy(joined_img), str(i) + ".jpg")
 
 """
 Img of actual world comes first.
@@ -119,7 +121,7 @@ def load_mnist(root):
             train=True,
             download=True,
             transform=transform.Compose([
-                transform.Resize(32),
+                transform.Resize(32)
             ])
         )
     )
@@ -130,7 +132,7 @@ def load_mnist(root):
             train=True,
             download=True,
             transform=transform.Compose([
-                transform.Resize(32),
+                transform.Resize(32)
             ])
         )
     )
