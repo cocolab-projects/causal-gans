@@ -43,8 +43,8 @@ def generate_worlds(mnist, n=1, cf = False):
         
         scenario.append((imgs, labels))
 
-        # joined_img = np.concatenate(tuple(imgs), axis=0)
-        # utils.save_image(torch.from_numpy(joined_img), str(i) + ".jpg")
+        joined_img = np.concatenate(tuple(imgs), axis=0)
+        utils.save_image(torch.from_numpy(joined_img), str(i) + ".jpg")
     return scenarios[0] if n is 1 else scenarios
 
 """
@@ -70,6 +70,7 @@ def img_of_world(world, four, effect, caus_noise, noncaus_noise):
     top_left = np.maximum(np.minimum(top_left, MAX_COLOR), MIN_COLOR)
 
     # put all four corner images together
+    breakpoint()
     return np.concatenate((np.concatenate((top_left, BLK_SQR), axis=1),
                       np.concatenate((BLK_SQR, bottom_right), axis=1)),
                      axis=0)
@@ -126,7 +127,7 @@ def load_mnist(root):
             download=True,
             transform=transform.Compose([transform.Resize(SQR_DIM), transform.ToTensor()])
         ),
-        batch_size = 100,
+        batch_size = 500,
         shuffle=False
     )
 
@@ -137,16 +138,16 @@ def load_mnist(root):
             download=True,
             transform=transform.Compose([transform.Resize(SQR_DIM), transform.ToTensor()])
         ),
-        batch_size = 100,
+        batch_size = 500,
         shuffle=False
     )
 
     train_data = {
-        'digits': np.concatenate([img.numpy() for img,label in train_loader], axis = 0),
+        'digits': np.concatenate([img.numpy() for img,label in train_loader], axis = 0)[:,0,...],
         'labels': np.concatenate([label.numpy() for img,label in train_loader], axis = 0),
     }
     test_data = {
-        'digits': np.concatenate([img.numpy() for img, label in test_loader],axis = 0),
+        'digits': np.concatenate([img.numpy() for img, label in test_loader],axis = 0)[:,0,...],
         'labels': np.concatenate([label.numpy() for img,label in train_loader], axis = 0),
     }
 
@@ -156,9 +157,7 @@ def mnist_dir_setup(train):
     if not os.path.isdir(DATA_DIR):
         os.makedirs(DATA_DIR)
 
-    mnist_root = DATA_DIR
-
-    train_mnist, test_mnist = load_mnist(mnist_root)
+    train_mnist, test_mnist = load_mnist(DATA_DIR)
     return train_mnist if train else test_mnist
 
 """
@@ -178,14 +177,12 @@ if __name__ ==  "__main__":
 
     np.random.seed(args.seed)
 
-    # if not os.path.isdir(DATA_DIR):
-    #     os.makedirs(DATA_DIR)
+    if not os.path.isdir(DATA_DIR):
+        os.makedirs(DATA_DIR)
 
-    # mnist_root = DATA_DIR
+    train_mnist, test_mnist = load_mnist(DATA_DIR)
+    # mnist= mnist_dir_setup(args.train)
 
-    # train_mnist, test_mnist = load_mnist(mnist_root)
-    mnist= mnist_dir_setup(args.train)
-
-    # train_mnist if args.train else test_mnist
+    mnist = train_mnist if args.train else test_mnist
 
     generate_worlds(mnist, n=args.dataset_size)
