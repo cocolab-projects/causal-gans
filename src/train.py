@@ -16,63 +16,49 @@ from datasets import CausalMNIST
 from models import LogisticRegression
 from utils import (AverageMeter, save_checkpoint, free_params, frozen_params)
 
-def train(criterion, loader, model, epoch):
-    model.train()
-    pbar = tqdm(total=len(loader))
+def loop(loader, model, mode, epoch=0):
     loss_meter = AverageMeter()
+    
+    if (mode == "train"):
+        pbar = tqdm(total=len(loader))
+        model.train()
+    else:
+        model.eval()
+
     for i, (images, labels) in enumerate(loader):
-        images,labels = images.to(device), labels.to(device)
+        images,labels = images.to(device), labels.to(device).float()
         outputs = model(images)
 
-        loss = criterion(outputs, labels.float().unsqueeze(1))
+        # if testing for accuracy, round outputs; else add dim to labels
+        if (mode=="test"):
+            outputs = np.rint(outputs.numpy()).flatten()
+        else:
+            lables = labels.unsqueeze(1)
 
-        loss_meter.update(loss.item(), loader.batch_size)
+        # apply criterion
+        loss = np.sum(outputs == labels.numpy()) if mode == "test" else (torch.nn.BCELoss(outputs, labels)).item()
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        if (mode == "test"):
+            print("batch sz: " + str(loader.batch_size))
 
-        pbar.set_postfix({'loss': loss_meter.avg})
-        pbar.update()
-    pbar.close()
+        loss_meter.update(loss, loader.batch_size)
 
-    if epoch % 20 == 0:
-        print('====> Train Epoch: {}\tLoss: {:.4f}'.format(epoch, loss_meter.avg))
-    return loss_meter.avg
+        if (mode == "train"):
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
+            pbar.set_postfix({'loss': loss_meter.avg})
+            pbar.update()
 
-def test(criterion, loader, model, epoch=0, testing=False):
-    model.eval()
-    total_loss = 0
-    with torch.no_grad():
-        loss_meter = AverageMeter()
+    if (mode == "train"):
+        pbar.close()
 
-        for i, (images, labels) in enumerate(loader):
-            images,labels = images.to(device), labels.to(device).float()
-            outputs = model(images)
-
-            # if testing for accuracy, round outputs
-            if (testing):
-                outputs = np.rint(outputs.numpy())
-                labels = labels.float().numpy()
-            else:
-                lables = labels.unsqueeze(1)
-
-            loss = criterion(outputs, labels)
-            loss = np.sum(loss) if testing else loss.item()
-
-            if (testing):
-                print(loss)
-                total_loss += loss
-                print("total loss so far: " + str(total_loss))
-
-            loss_meter.update(loss, loader.batch_size)
-
-        if testing:
-            print('====> Test Accuracy: {}'.format(loss_meter.avg))
-        elif epoch % 20 == 0:
-            print('====> Validate Epoch: {}\tLoss: {:.4f}'.format(epoch, loss_meter.avg))
-
+    if (mode=="test"):
+            print('====> test accuracy: {}'.format(avg_loss))
+    elif epoch % 20 == 0:
+            print('====> {} epoch: {}\tloss: {:.4f}'.format(mode, epoch, avg_loss))
+    
     return loss_meter.avg
 
 def load_checkpoint(folder='./', filename='model_best.pth.tar'):
@@ -110,7 +96,6 @@ if __name__ == "__main__":
 
     log_reg = LogisticRegression()
     log_reg = log_reg.to(device)
-    criterion = torch.nn.BCELoss()
     optimizer = torch.optim.Adam(log_reg.parameters(), lr=args.lr_rt)
 
     best_loss = float('inf')
@@ -118,8 +103,8 @@ if __name__ == "__main__":
 
     for epoch in range(int(args.epochs)):
 
-        train_loss = train(criterion, train_loader, log_reg, epoch)
-        test_loss = test(criterion, valid_loader, log_reg, epoch)
+        train_loss = loop(train_loader, log_reg, "train", epoch)
+        validate_loss = loop(valid_loader, log_reg, "validate", epoch)
 
         is_best = test_loss < best_loss
         best_loss = min(test_loss, best_loss)
@@ -142,4 +127,4 @@ if __name__ == "__main__":
     test_model = LogisticRegression()
     _,_,state_dict = load_checkpoint(folder=args.out_dir)
     test_model.load_state_dict(state_dict)
-    test(lambda x,y: x==y, test_loader, test_model, testing=True)
+    loop(test_loader, test_model, "test")
