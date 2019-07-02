@@ -25,3 +25,11 @@ def save_checkpoint(state, is_best, folder='./', filename='checkpoint.pth.tar'):
     if is_best:
         shutil.copyfile(os.path.join(folder, filename),
                         os.path.join(folder, 'model_best.pth.tar'))
+
+def free_params(module):
+    for p in module.parameters():
+        p.requires_grad = True
+
+def frozen_params(module):
+    for p in module.parameters():
+        p.requires_grad = False

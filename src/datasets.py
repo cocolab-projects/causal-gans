@@ -34,13 +34,11 @@ class CausalMNIST(Dataset):
 			self.length = VAL_SET_SZ
 		else:
 			raise RuntimeError("CausalMNIST was expecting split to be 'train', 'test', or 'validate'.")
+		
+		self.imgs = [self.img_transform(Image.fromarray(generate_worlds(self.mnist)[0])) for i in range(self.length)]
+		self.labels = ["causal" in utt for i in range(self.length)]
 
 	def __getitem__(self, index):
-		img, utt = generate_worlds(self.mnist)
-		img = Image.fromarray(img)
-		img = self.img_transform(img)
-		label = "causal" in utt
-
 		return img, label
 
 	def __len__(self):
