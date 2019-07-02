@@ -16,17 +16,17 @@ from datasets import CausalMNIST
 from models import LogisticRegression
 from utils import (AverageMeter, save_checkpoint, free_params, frozen_params)
 
-def train(criterion, train_loader, model, epoch):
+def train(criterion, loader, model, epoch):
     model.train()
-    pbar = tqdm(total=len(train_loader))
+    pbar = tqdm(total=len(loader))
     loss_meter = AverageMeter()
-    for i, (images, labels) in enumerate(train_loader):
+    for i, (images, labels) in enumerate(loader):
         images,labels = images.to(device), labels.to(device)
         outputs = model(images)
 
         loss = criterion(outputs, labels.float().unsqueeze(1))
 
-        loss_meter.update(loss.item(), args.batch_size)
+        loss_meter.update(loss.item(), loader.batch_size)
 
         optimizer.zero_grad()
         loss.backward()
@@ -43,7 +43,7 @@ def train(criterion, train_loader, model, epoch):
 
 def test(criterion, loader, model, epoch=0, testing=False):
     model.eval()
-
+    total_loss = 0
     with torch.no_grad():
         loss_meter = AverageMeter()
 
@@ -61,7 +61,12 @@ def test(criterion, loader, model, epoch=0, testing=False):
             loss = criterion(outputs, labels)
             loss = np.sum(loss) if testing else loss.item()
 
-            loss_meter.update(loss, args.batch_size)
+            if (testing):
+                print(loss)
+                total_loss += loss
+                print("total loss so far: " + str(total_loss))
+
+            loss_meter.update(loss, loader.batch_size)
 
         if testing:
             print('====> Test Accuracy: {}'.format(loss_meter.avg))
