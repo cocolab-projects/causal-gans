@@ -14,6 +14,68 @@ from torch.utils.data import DataLoader
 
 from datasets import CausalMNIST
 from models import LogisticRegression
+from utils import (AverageMeter, save_checkpoint, free_params, frozen_params)
+
+def train(criterion, train_loader, model, epoch):
+    model.train()
+    pbar = tqdm(total=len(train_loader))
+    loss_meter = AverageMeter()
+    for i, (images, labels) in enumerate(train_loader):
+        images,labels = images.to(device), labels.to(device)
+        outputs = model(images)
+
+        loss = criterion(outputs, labels.float().unsqueeze(1))
+
+        loss_meter.update(loss.item(), args.batch_size)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        pbar.set_postfix({'loss': loss_meter.avg})
+        pbar.update()
+    pbar.close()
+
+    if epoch % 20 == 0:
+        print('====> Train Epoch: {}\tLoss: {:.4f}'.format(epoch, loss_meter.avg))
+    return loss_meter.avg
+
+
+def test(criterion, loader, model, epoch=0, testing=False):
+    model.eval()
+
+    with torch.no_grad():
+        loss_meter = AverageMeter()
+
+        for i, (images, labels) in enumerate(loader):
+            images,labels = images.to(device), labels.to(device).float()
+            outputs = model(images)
+
+            # if testing for accuracy, round outputs
+            if (testing):
+                outputs = np.rint(outputs.numpy())
+                labels = labels.float().numpy()
+            else:
+                lables = labels.unsqueeze(1)
+
+            loss = criterion(outputs, labels)
+            loss = np.sum(loss) if testing else loss.item()
+
+            loss_meter.update(loss, args.batch_size)
+
+        if testing:
+            print('====> Test Accuracy: {}'.format(loss_meter.avg))
+        elif epoch % 20 == 0:
+            print('====> Validate Epoch: {}\tLoss: {:.4f}'.format(epoch, loss_meter.avg))
+
+    return loss_meter.avg
+
+def load_checkpoint(folder='./', filename='model_best.pth.tar'):
+    checkpoint = torch.load(folder + filename)
+    epoch = checkpoint['epoch']
+    track_loss = checkpoint['track_loss']
+    model = checkpoint['model']
+    return epoch, track_loss, model
 
 if __name__ == "__main__":
     import argparse
@@ -50,12 +112,9 @@ if __name__ == "__main__":
     track_loss = np.zeros((args.epochs, 2))
 
     for epoch in range(int(args.epochs)):
-        pbar = tqdm(total=len(train_loader))
-        train(criterion, train_loader, model, epoch)
-        test(criterion, valid_loader, model, epoch)
 
-        train_loss = train(epoch)
-        test_loss = test(epoch)
+        train_loss = train(criterion, train_loader, log_reg, epoch)
+        test_loss = test(criterion, valid_loader, log_reg, epoch)
 
         is_best = test_loss < best_loss
         best_loss = min(test_loss, best_loss)
@@ -76,55 +135,6 @@ if __name__ == "__main__":
     test_loader = DataLoader(test_dataset, shuffle=True, batch_size=args.batch_size)
 
     test_model = LogisticRegression()
-    _,_,state_dict = load_checkpoint(folder=ars.out_dir)
+    _,_,state_dict = load_checkpoint(folder=args.out_dir)
     test_model.load_state_dict(state_dict)
-    test(criterion, test_model, test_loader)
-
-def train(criterion, train_loader, model, epoch):
-    model.train()
-    pbar = tqdm(total=len(train_loader))
-    loss_meter = AverageMeter()
-    for i, (images, labels) in enumerate(train_loader):
-        images,labels = images.to(device), labels.to(device)
-        outputs = model(images)
-
-        loss = criterion(outputs, labels.float().unsqueeze(1))
-
-        loss_meter.update(loss.item(), args.batch_size)
-
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        pbar.set_postfix({'loss': loss_meter.avg})
-        pbar.update()
-    pbar.close()
-
-    if epoch % 20 == 0:
-        print('====> Train Epoch: {}\tLoss: {:.4f}'.format(epoch, loss_meter.avg))
-
-    return loss_meter.avg
-
-def test(criterion, loader, model, epoch=0):
-    model.eval()
-
-    with torch.no_grad():
-        loss_meter = AverageMeter()
-
-        for i, (images, labels) in enumerate(loader):
-            images,labels = images.to(device), labels.to(device)
-            outputs = model(images)
-
-            loss = criterion(outputs, labels.float().unsqueeze(1))
-            loss_meter.update(loss.item(), args.batch_size)
-
-        if epoch % 10 == 0:
-            print('====> Test/validate Epoch: {}\tLoss: {:.4f}'.format(epoch, loss_meter.avg))
-    return loss_meter.avg
-
-def load_checkpoint(folder='./', filename='model_best.pth.tar'):
-    checkpoint = torch.load(folder + filename)
-    epoch = checkpoint['epoch']
-    track_loss = checkpoint['track_loss']
-    model = checkpoint['model']
-    return epoch, track_loss, model
+    test(lambda x,y: x==y, test_loader, test_model, testing=True)

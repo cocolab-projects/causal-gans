@@ -1,8 +1,6 @@
 """
 generate.py
 
-pathlib library
-
 @author mmosse19
 @version June 2019
 """
@@ -34,6 +32,7 @@ NONCAUS_NOISE_WT = 0.005
 CAUS_NOISE_MEAN = MAX_COLOR/2
 CAUS_NOISE_VARIANCE = (MAX_COLOR/6)**2
 
+# why do we vary "causal"?
 def generate_worlds(mnist, n=1, cf = False):
     scenarios = [] # a scenario is an actual world and its cfs
     for i in range(n):
@@ -158,6 +157,7 @@ def load_mnist(root):
 
     return train_data, test_data
 
+# might be worth using pathlib
 def mnist_dir_setup(train):
     if not os.path.isdir(DATA_DIR):
         os.makedirs(DATA_DIR)
