@@ -18,6 +18,7 @@ from models import LogisticRegression
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
+    parser.add_argument('--out_dir', type=str, help='where to save checkpoints',default="./")
     parser.add_argument('--batch-size', type=int, default=32,
                         help='batch size [default=32]')
     parser.add_argument('--lr_rt', type=float, default=2e-4,
@@ -75,8 +76,9 @@ if __name__ == "__main__":
     test_loader = DataLoader(test_dataset, shuffle=True, batch_size=args.batch_size)
 
     test_model = LogisticRegression()
-    test_model.load_checkpoint()[2]
-    test(test_model)
+    _,_,state_dict = load_checkpoint(folder=ars.out_dir)
+    test_model.load_state_dict(state_dict)
+    test(criterion, test_model, test_loader)
 
 def train(criterion, train_loader, model, epoch):
     model.train()
