@@ -9,9 +9,9 @@ from torchvision import transforms
 
 from generate import mnist_dir_setup, generate_worlds
 
-TRAIN_SET_SZ = 400
-TEST_SET_SZ = 400
-VAL_SET_SZ = 400
+TRAIN_SET_SZ = 6000
+TEST_SET_SZ = 1500
+VAL_SET_SZ = 1500
 
 DATA_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), "../data")
 CAUSAL_MNIST_DIR = os.path.join(DATA_DIR, 'causal_mnist')
