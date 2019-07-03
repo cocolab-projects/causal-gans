@@ -28,6 +28,7 @@ DATA_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), "../data")
 # "CE": probability of roof being wet, due to rain
 # "bE": probability of mike throwing water balloon at roof
 
+
 p = {"causal": .5, "C": .8, "noC": .8, "cE": .6, "bE": .5}
 event_functions = { "causal": lambda x: x**2,
                     "C": lambda x: (x+1)**2,
@@ -35,6 +36,7 @@ event_functions = { "causal": lambda x: x**2,
                     "cE": lambda x: (x+2)**2,
                     "bE": lambda x: x
                     }
+TOTAL_NUM_WORLDS = len(p)
 
 SQR_DIM = 32
 BLK_SQR = np.zeros((SQR_DIM,SQR_DIM))
@@ -49,20 +51,19 @@ def generate_worlds(mnist, n=1, cf = False):
     scenarios = [] # a scenario is an actual world and its cfs
     for i in range(n):
         act_world = {key: np.random.binomial(1,p[key]) for key in p.keys()}
-        cf_worlds = generate_cf_worlds(act_world) if cf else []
-        all_worlds = [act_world] + cf_worlds
+        if (cf):
+            cf_worlds = generate_cf_worlds(act_world)
+            all_worlds = [act_world] + cf_worlds
+            imgs = imgs_of_worlds(all_worlds, mnist)
+            img = np.concatenate(tuple(imgs), axis=1)
+            labels = [reformat(world)[1] for world in all_worlds]
+        else:
+            all_worlds = [act_world]
+            img, labels = imgs_of_worlds([act_world], mnist)[0], reformat(act_world)[1]
         
-        imgs = imgs_of_worlds(all_worlds, mnist)
-        labels = [reformat(world)[1] for world in all_worlds]
+        scenarios.append((img, labels))
+        if (n is 1): return scenarios[0]
 
-        if (n is 1):
-            return imgs[0], labels[0]
-        elif (not cf):
-            imgs, labels = imgs[0], labels[0]
-        
-        scenarios.append((imgs, labels))
-
-        # joined_img = np.concatenate(tuple(imgs), axis=0)
         # utils.save_image(torch.from_numpy(joined_img), str(i) + ".jpg")
     return scenarios
 

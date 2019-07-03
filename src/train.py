@@ -18,6 +18,7 @@ from datasets import CausalMNIST
 from models import LogisticRegression
 from utils import (AverageMeter, save_checkpoint, free_params, frozen_params)
 
+# single pass over the data
 def loop(loader, model, mode, pbar=None):
     loss_meter = AverageMeter()
     causal_loss_meter = AverageMeter()
@@ -92,6 +93,7 @@ def load_checkpoint(folder='./', filename='model_best.pth.tar'):
     return epoch, track_loss, model
 
 if __name__ == "__main__":
+    # handle args
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--out_dir', type=str, help='where to save checkpoints',default="./")
@@ -111,16 +113,20 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
+    # setup datasets, data loaders, and model
+    cf = True
+
     train_dataset = CausalMNIST(split="train")
     train_loader = DataLoader(train_dataset, shuffle=True, batch_size=args.batch_size)
 
     valid_dataset = CausalMNIST(split="validate")
     valid_loader = DataLoader(valid_dataset, shuffle=True, batch_size=args.batch_size)
 
-    log_reg = LogisticRegression()
+    log_reg = LogisticRegression(cf)
     log_reg = log_reg.to(device)
     optimizer = torch.optim.Adam(log_reg.parameters(), lr=args.lr_rt)
 
+    # train and validate, keeping track of best loss in validation
     best_loss = float('inf')
     track_loss = np.zeros((args.epochs, 2))
 
@@ -144,10 +150,11 @@ if __name__ == "__main__":
         }, is_best, folder = args.out_dir)
         # np.save(os.path.join(args.out_dir, 'loss.npy'), track_loss)
 
+    # test
     test_dataset = CausalMNIST(split='test')
     test_loader = DataLoader(test_dataset, shuffle=True, batch_size=args.batch_size)
 
-    test_model = LogisticRegression()
+    test_model = LogisticRegression(cf)
     _,_,state_dict = load_checkpoint(folder=args.out_dir)
     test_model.load_state_dict(state_dict)
     run_epoch(test_loader, test_model, "test")
