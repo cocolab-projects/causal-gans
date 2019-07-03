@@ -10,15 +10,15 @@ from torchvision import transforms
 from generate import mnist_dir_setup, generate_worlds
 
 TRAIN_SET_SZ = 1000
-TEST_SET_SZ = 125
-VAL_SET_SZ = 125
+VAL_SET_SZ = 1000
+TEST_SET_SZ = 1000
 
 DATA_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), "../data")
 CAUSAL_MNIST_DIR = os.path.join(DATA_DIR, 'causal_mnist')
 
 class CausalMNIST(Dataset):
 	# later: add vocab
-	def __init__(self, root=CAUSAL_MNIST_DIR, split="train",
+	def __init__(self, split, root=CAUSAL_MNIST_DIR,
 		channels=1, classes=None, target_trials_only=False):
 		super(CausalMNIST, self).__init__()
 		self.root = root
@@ -34,8 +34,8 @@ class CausalMNIST(Dataset):
 		else:
 			raise RuntimeError("CausalMNIST was expecting split to be 'train', 'test', or 'validate'.")
 		
-		data = [generate_worlds(self.mnist) for i in range(self.length)]
-		self.imgs = [self.img_transform(Image.fromarray(pt[0])) for pt in data]
+		data = generate_worlds(self.mnist, n=self.length)
+		self.imgs = [self.img_transform(Image.fromarray(data[i][0])) for i in range(self.length)]
 		self.labels = ["causal" in pt[1] for pt in data]
 
 	def __getitem__(self, index):

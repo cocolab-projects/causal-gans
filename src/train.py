@@ -20,22 +20,36 @@ from utils import (AverageMeter, save_checkpoint, free_params, frozen_params)
 
 def loop(loader, model, mode, pbar=None):
     loss_meter = AverageMeter()
+    causal_loss_meter = AverageMeter()
+    
+    if (mode != "train"):
+        criterion = torch.nn.BCELoss()
 
     for i, (images, labels) in enumerate(loader):
         images,labels = images.to(device), labels.to(device).float()
         outputs = model(images)
 
         # if testing for accuracy, round outputs; else add dim to labels
-        if (mode=="test"):
+        if (mode == "test"):
             outputs = np.rint(outputs.numpy().flatten())
         else:
             labels = labels.unsqueeze(1)
 
-        # apply criterion
-        criterion = torch.nn.BCELoss()
-        loss = outputs == labels.numpy() if mode == "test" else criterion(outputs, labels)
-        loss_amt = np.mean(loss) if mode == "test" else loss.item()
+        # calculate loss
+        if (mode == "test"):
+            labels = labels.numpy()
+            loss = (outputs == labels)
+            loss_amt = np.mean(loss)
 
+            causal_indices = np.where(labels == 1)
+            causal_loss = (outputs[causal_indices] == labels[causal_indices])
+            causal_loss_amt = np.mean(causal_loss)
+            causal_loss_meter.update(causal_loss_amt, len(causal_indices))
+        else:
+            loss = criterion(outputs,labels)
+            loss_amt = loss.item()
+
+        # update loss meters
         loss_meter.update(loss_amt, loader.batch_size)
 
         if (mode == "train"):
@@ -46,21 +60,22 @@ def loop(loader, model, mode, pbar=None):
             pbar.set_postfix({'loss': loss_meter.avg})
             pbar.update()
 
-    return loss_meter.avg
+    loss_meter.avg, causal_loss_meter.avg
 
-def run(loader, model, mode, epoch=0):
+def run_epoch(loader, model, mode, epoch=0):
     if (mode == "train"):
         model.train()
         pbar = tqdm(total=len(loader))
-        avg_loss = loop(loader, model, mode, pbar)
+        avg_loss, _ = loop(loader, model, mode, pbar)
         pbar.close()
     else:
         model.eval()
         with torch.no_grad():
-            avg_loss = loop(loader, model, mode)
+            avg_loss, avg_causal_loss = loop(loader, model, mode)
 
     if (mode=="test"):
             print('====> test accuracy: {}%'.format(avg_loss*100))
+            print('====> test accuracy on causal pics: {}%'.format(avg_causal_loss*100))
     elif epoch % 20 == 0:
             print('====> {} epoch: {}\tloss: {:.4f}'.format(mode, epoch, avg_loss))
     return avg_loss
@@ -92,7 +107,7 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    train_dataset = CausalMNIST()
+    train_dataset = CausalMNIST(split="train")
     train_loader = DataLoader(train_dataset, shuffle=True, batch_size=args.batch_size)
 
     valid_dataset = CausalMNIST(split="validate")
@@ -107,8 +122,8 @@ if __name__ == "__main__":
 
     for epoch in range(int(args.epochs)):
 
-        train_loss = run(train_loader, log_reg, "train", epoch)
-        validate_loss = run(valid_loader, log_reg, "validate", epoch)
+        train_loss = run_epoch(train_loader, log_reg, "train", epoch)
+        validate_loss = run_epoch(valid_loader, log_reg, "validate", epoch)
 
         is_best = validate_loss < best_loss
         best_loss = min(validate_loss, best_loss)
@@ -131,4 +146,4 @@ if __name__ == "__main__":
     test_model = LogisticRegression()
     _,_,state_dict = load_checkpoint(folder=args.out_dir)
     test_model.load_state_dict(state_dict)
-    run(test_loader, test_model, "test")
+    run_epoch(test_loader, test_model, "test")

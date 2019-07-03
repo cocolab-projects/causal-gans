@@ -20,58 +20,72 @@ import pdb
 
 DATA_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), "../data")
 
-p = {"causal": .5, "C": .8, "O": .8, "cE": .9, "bE": .2}
+# interpretations
+# "causal": probability that weather forecast predicts rain (it never predicts no rain when there's rain)
+# "C": probability of rain, given forecast
+# "O": probability of sprinklers
+# note: O and C are indistinguishable; both are evidenced by wet grass
+# "CE": probability of roof being wet, due to rain
+# "bE": probability of mike throwing water balloon at roof
+
+p = {"causal": .5, "C": .8, "O": .8, "cE": .6, "bE": .5}
+functions = {   "causal": lambda x: x**2,
+                "C": lambda x: x,
+                "O": lambda x: x,
+                "cE": lambda x: x**2,
+                "bE": lambda x: x
+                }
 
 SQR_DIM = 32
 BLK_SQR = np.zeros((SQR_DIM,SQR_DIM))
 MIN_COLOR = 0.0
 MAX_COLOR = 255.0
 
-CAUS_NOISE_WT = 0.005
-NONCAUS_NOISE_WT = 0.005
-CAUS_NOISE_MEAN = MAX_COLOR/2
-CAUS_NOISE_VARIANCE = (MAX_COLOR/6)**2
-
 # why do we vary "causal"?
+# causal entity or process
+# to do: clean up handling of case where cf
 def generate_worlds(mnist, n=1, cf = False):
+
     scenarios = [] # a scenario is an actual world and its cfs
     for i in range(n):
         act_world = {key: np.random.binomial(1,p[key]) for key in p.keys()}
         cf_worlds = generate_cf_worlds(act_world) if cf else []
-        all_worlds = [reformat(act_world)] + cf_worlds
+        all_worlds = [act_world] + cf_worlds
         
         imgs = imgs_of_worlds(all_worlds, mnist)
         labels = [world[1] for world in all_worlds]
 
         if (n is 1):
             return imgs[0], labels[0]
+        elif (not cf):
+            imgs, labels = imgs[0], labels[0]
         
         scenarios.append((imgs, labels))
 
-        joined_img = np.concatenate(tuple(imgs), axis=0)
-        utils.save_image(torch.from_numpy(joined_img), str(i) + ".jpg")
+        # joined_img = np.concatenate(tuple(imgs), axis=0)
+        # utils.save_image(torch.from_numpy(joined_img), str(i) + ".jpg")
     return scenarios
 
 """
 Img of actual world comes first.
 """
+def num_from_mnist(digit, mnist):
+    loc = np.random.choice(np.where(mnist["labels"] == digit)[0])
+    # loc = (np.where(mnist["labels"] == digit)[0])[0]
+    return mnist["digits"][loc]
+
 def imgs_of_worlds(worlds, mnist):
     four_img, three_img = num_from_mnist(4, mnist), num_from_mnist(3, mnist)
-    caus_noise, noncaus_noise = noise()
-    return [img_of_world(world, four_img, three_img, caus_noise, noncaus_noise) for world in worlds]
+    return [img_of_world(world, four_img, three_img) for world in worlds]
 
-def img_of_world(world, four_img, three_img, caus_noise, noncaus_noise):
+def img_of_world(world, four_img, three_img):
+    world = reformat(world)
     nums, utt = world[0], world[1]
 
     # set numbers in corners if they're in the world
     top_left = four_img if nums[0] else BLK_SQR
     bottom_right = three_img if nums[1] else BLK_SQR
-
-    # add noise, make sure pixels are in range (0,255)
-    if("causal" in utt):
-        top_left = np.add(top_left, caus_noise)
-    elif("4" in utt):
-        top_left = np.add(top_left, noncaus_noise)
+    
     top_left = np.maximum(np.minimum(top_left, MAX_COLOR), MIN_COLOR)
 
     # put all four corner images together
@@ -79,18 +93,10 @@ def img_of_world(world, four_img, three_img, caus_noise, noncaus_noise):
                       np.concatenate((BLK_SQR, bottom_right), axis=1)),
                      axis=0)
 
-def noise():
-    return (np.random.normal(CAUS_NOISE_MEAN, CAUS_NOISE_VARIANCE, (SQR_DIM,SQR_DIM))*CAUS_NOISE_WT,
-                np.random.uniform(0,MAX_COLOR, (SQR_DIM,SQR_DIM))*NONCAUS_NOISE_WT)
-
-def num_from_mnist(digit, mnist):
-    loc = np.random.choice(np.where(mnist["labels"] == digit)[0])
-    return mnist["digits"][loc]
-
 def reformat(world):
     if(world["causal"]):
         four = 4 if world["C"] else ""
-        three = 3 if (world["C"] and world["cE"]) else ""
+        three = 3 if ((world["C"] and world["cE"]) or world["bE"]) else ""
 
         nums = [four, three]
         utt = (("causal " + str(four)) if str(four) else "") + str(three)
