@@ -34,9 +34,10 @@ class CausalMNIST(Dataset):
 		else:
 			raise RuntimeError("CausalMNIST was expecting split to be 'train', 'test', or 'validate'.")
 		
-		data = generate_worlds(self.mnist, n=self.length, cf=cf)
-		self.imgs = [self.img_transform(Image.fromarray(data[i][0])) for i in range(self.length)]
-		self.labels = ["causal" in pt[1] for pt in data]
+		scenarios = generate_worlds(self.mnist, n=self.length, cf=cf)
+		self.imgs = [self.img_transform(Image.fromarray(scenarios[i][0])) for i in range(self.length)]
+		
+		self.labels = ["causal" in pt[1] for pt in scenarios]
 
 	def __getitem__(self, index):
 		return self.imgs[index], self.labels[index]

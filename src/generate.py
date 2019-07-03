@@ -53,15 +53,16 @@ def generate_worlds(mnist, n=1, cf = False):
         act_world = {key: np.random.binomial(1,p[key]) for key in p.keys()}
         if (cf):
             cf_worlds = generate_cf_worlds(act_world)
-            all_worlds = [act_world] + cf_worlds
+            all_worlds = [act_world] + cf_worlds    # act_world comes first
             imgs = imgs_of_worlds(all_worlds, mnist)
             img = np.concatenate(tuple(imgs), axis=1)
             labels = [reformat(world)[1] for world in all_worlds]
+            label = labels[0]
         else:
             all_worlds = [act_world]
-            img, labels = imgs_of_worlds([act_world], mnist)[0], reformat(act_world)[1]
+            img, label = imgs_of_worlds([act_world], mnist)[0], reformat(act_world)[1]
         
-        scenarios.append((img, labels))
+        scenarios.append((img, label))
         if (n is 1): return scenarios[0]
 
         # utils.save_image(torch.from_numpy(joined_img), str(i) + ".jpg")

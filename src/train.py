@@ -45,7 +45,6 @@ def loop(loader, model, mode, pbar=None):
             causal_indices = np.where(labels == 1)
             causal_loss = (outputs[causal_indices] == labels[causal_indices])
             causal_loss_amt = np.mean(causal_loss)
-            breakpoint()
             causal_loss_meter.update(causal_loss_amt, len(causal_indices))
         else:
             loss = criterion(outputs,labels)
