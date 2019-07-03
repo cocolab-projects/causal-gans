@@ -124,9 +124,7 @@ Given an actual set of values for the random variables, generate a list of
 counterfactuals by flipping each of the random variables, one at a time
 """
 def generate_cf_worlds(act_world):
-    cfs = [flip_rvs(act_world, key_to_vary) for key_to_vary in act_world]
-    cf_worlds = [reformat(w) for w in cfs]
-    return cf_worlds
+    return [flip_rvs(act_world, key_to_vary) for key_to_vary in act_world]
 
 # this takes a lot of time and should be improved
 def load_mnist(root):

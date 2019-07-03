@@ -116,10 +116,10 @@ if __name__ == "__main__":
     # setup datasets, data loaders, and model
     cf = True
 
-    train_dataset = CausalMNIST(split="train")
+    train_dataset = CausalMNIST(split="train", cf=cf)
     train_loader = DataLoader(train_dataset, shuffle=True, batch_size=args.batch_size)
 
-    valid_dataset = CausalMNIST(split="validate")
+    valid_dataset = CausalMNIST(split="validate", cf=cf)
     valid_loader = DataLoader(valid_dataset, shuffle=True, batch_size=args.batch_size)
 
     log_reg = LogisticRegression(cf)
@@ -151,7 +151,7 @@ if __name__ == "__main__":
         # np.save(os.path.join(args.out_dir, 'loss.npy'), track_loss)
 
     # test
-    test_dataset = CausalMNIST(split='test')
+    test_dataset = CausalMNIST(split='test',cf=cf)
     test_loader = DataLoader(test_dataset, shuffle=True, batch_size=args.batch_size)
 
     test_model = LogisticRegression(cf)

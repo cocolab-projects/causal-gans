@@ -19,7 +19,7 @@ CAUSAL_MNIST_DIR = os.path.join(DATA_DIR, 'causal_mnist')
 class CausalMNIST(Dataset):
 	# later: add vocab
 	def __init__(self, split, root=CAUSAL_MNIST_DIR,
-		channels=1, classes=None, target_trials_only=False):
+		channels=1, classes=None, target_trials_only=False, cf=False):
 		super(CausalMNIST, self).__init__()
 		self.root = root
 		self.mnist = mnist_dir_setup(split == "train")
@@ -34,7 +34,7 @@ class CausalMNIST(Dataset):
 		else:
 			raise RuntimeError("CausalMNIST was expecting split to be 'train', 'test', or 'validate'.")
 		
-		data = generate_worlds(self.mnist, n=self.length)
+		data = generate_worlds(self.mnist, n=self.length, cf=cf)
 		self.imgs = [self.img_transform(Image.fromarray(data[i][0])) for i in range(self.length)]
 		self.labels = ["causal" in pt[1] for pt in data]
 
