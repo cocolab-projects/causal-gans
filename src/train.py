@@ -22,7 +22,7 @@ def loop(loader, model, mode, pbar=None):
     loss_meter = AverageMeter()
     causal_loss_meter = AverageMeter()
     
-    if (mode != "train"):
+    if (mode != "test"):
         criterion = torch.nn.BCELoss()
 
     for i, (images, labels) in enumerate(loader):
@@ -32,18 +32,19 @@ def loop(loader, model, mode, pbar=None):
         # if testing for accuracy, round outputs; else add dim to labels
         if (mode == "test"):
             outputs = np.rint(outputs.numpy().flatten())
+            labels = labels.numpy()
         else:
             labels = labels.unsqueeze(1)
 
         # calculate loss
         if (mode == "test"):
-            labels = labels.numpy()
             loss = (outputs == labels)
             loss_amt = np.mean(loss)
 
             causal_indices = np.where(labels == 1)
             causal_loss = (outputs[causal_indices] == labels[causal_indices])
             causal_loss_amt = np.mean(causal_loss)
+
             causal_loss_meter.update(causal_loss_amt, len(causal_indices))
         else:
             loss = criterion(outputs,labels)
@@ -60,7 +61,7 @@ def loop(loader, model, mode, pbar=None):
             pbar.set_postfix({'loss': loss_meter.avg})
             pbar.update()
 
-    loss_meter.avg, causal_loss_meter.avg
+    return loss_meter.avg, causal_loss_meter.avg
 
 def run_epoch(loader, model, mode, epoch=0):
     if (mode == "train"):
@@ -74,11 +75,14 @@ def run_epoch(loader, model, mode, epoch=0):
             avg_loss, avg_causal_loss = loop(loader, model, mode)
 
     if (mode=="test"):
-            print('====> test accuracy: {}%'.format(avg_loss*100))
-            print('====> test accuracy on causal pics: {}%'.format(avg_causal_loss*100))
+            print('====> test accuracy: {}%'.format(to_percent(avg_loss)))
+            print('====> test accuracy on causal pics: {}%'.format(to_percent(avg_causal_loss)))
     elif epoch % 20 == 0:
             print('====> {} epoch: {}\tloss: {:.4f}'.format(mode, epoch, avg_loss))
     return avg_loss
+
+def to_percent(float):
+    return np.around(float*100, decimals=2)
 
 def load_checkpoint(folder='./', filename='model_best.pth.tar'):
     checkpoint = torch.load(folder + filename)

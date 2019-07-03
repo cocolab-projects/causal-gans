@@ -23,18 +23,18 @@ DATA_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), "../data")
 # interpretations
 # "causal": probability that weather forecast predicts rain (it never predicts no rain when there's rain)
 # "C": probability of rain, given forecast
-# "O": probability of sprinklers
+# "noC": probability of sprinklers
 # note: O and C are indistinguishable; both are evidenced by wet grass
 # "CE": probability of roof being wet, due to rain
 # "bE": probability of mike throwing water balloon at roof
 
-p = {"causal": .5, "C": .8, "O": .8, "cE": .6, "bE": .5}
-functions = {   "causal": lambda x: x**2,
-                "C": lambda x: x,
-                "O": lambda x: x,
-                "cE": lambda x: x**2,
-                "bE": lambda x: x
-                }
+p = {"causal": .5, "C": .8, "noC": .8, "cE": .6, "bE": .5}
+event_functions = { "causal": lambda x: x**2,
+                    "C": lambda x: (x+1)**2,
+                    "noC": lambda x: x,
+                    "cE": lambda x: (x+2)**2,
+                    "bE": lambda x: x
+                    }
 
 SQR_DIM = 32
 BLK_SQR = np.zeros((SQR_DIM,SQR_DIM))
@@ -53,7 +53,7 @@ def generate_worlds(mnist, n=1, cf = False):
         all_worlds = [act_world] + cf_worlds
         
         imgs = imgs_of_worlds(all_worlds, mnist)
-        labels = [world[1] for world in all_worlds]
+        labels = [reformat(world)[1] for world in all_worlds]
 
         if (n is 1):
             return imgs[0], labels[0]
@@ -66,9 +66,6 @@ def generate_worlds(mnist, n=1, cf = False):
         # utils.save_image(torch.from_numpy(joined_img), str(i) + ".jpg")
     return scenarios
 
-"""
-Img of actual world comes first.
-"""
 def num_from_mnist(digit, mnist):
     loc = np.random.choice(np.where(mnist["labels"] == digit)[0])
     # loc = (np.where(mnist["labels"] == digit)[0])[0]
@@ -79,13 +76,15 @@ def imgs_of_worlds(worlds, mnist):
     return [img_of_world(world, four_img, three_img) for world in worlds]
 
 def img_of_world(world, four_img, three_img):
-    world = reformat(world)
-    nums, utt = world[0], world[1]
+    nums, utt = reformat(world)[0], reformat(world)[1]
 
     # set numbers in corners if they're in the world
     top_left = four_img if nums[0] else BLK_SQR
     bottom_right = three_img if nums[1] else BLK_SQR
     
+    # apply nonlinear transformations
+    for event in world:
+        if (event): top_left = event_functions[event](top_left)
     top_left = np.maximum(np.minimum(top_left, MAX_COLOR), MIN_COLOR)
 
     # put all four corner images together
@@ -101,7 +100,7 @@ def reformat(world):
         nums = [four, three]
         utt = (("causal " + str(four)) if str(four) else "") + str(three)
     else:
-        four = 4 if world["O"] else ""
+        four = 4 if world["noC"] else ""
         three = 3 if world["bE"] else ""
 
         nums = [four, three]
