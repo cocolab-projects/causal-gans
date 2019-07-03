@@ -36,7 +36,7 @@ event_functions = { "causal": lambda x: x**2,
                     "cE": lambda x: (x+2)**2,
                     "bE": lambda x: x
                     }
-TOTAL_NUM_WORLDS = len(p)
+TOTAL_NUM_WORLDS = len(p) + 1
 
 SQR_DIM = 32
 BLK_SQR = np.zeros((SQR_DIM,SQR_DIM))

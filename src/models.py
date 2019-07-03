@@ -12,7 +12,6 @@ class LogisticRegression(nn.Module):
         super(LogisticRegression, self).__init__()
         if (cf):
             input_dim *=TOTAL_NUM_WORLDS
-        
         self.linear = torch.nn.Linear(input_dim, output_dim)
 
     def forward(self, img):
