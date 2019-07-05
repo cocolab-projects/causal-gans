@@ -13,9 +13,11 @@ import matplotlib.pyplot as plt
 
 import torch
 from torch.utils.data import DataLoader
+import torchvision.utils as utils
+from torchvision.utils import save_image
 
 from datasets import CausalMNIST
-from models import LogisticRegression
+from models import (LogisticRegression, Generator, Discriminator)
 from utils import (AverageMeter, save_checkpoint, free_params, frozen_params)
 
 # single pass over the data
@@ -26,9 +28,9 @@ def loop(loader, model, mode, pbar=None):
     if (mode != "test"):
         criterion = torch.nn.BCELoss()
 
-    for i, (images, labels) in enumerate(loader):
-        images,labels = images.to(device), labels.to(device).float()
-        outputs = model(images)
+    for i, (imgs, labels) in enumerate(loader):
+        imgs,labels = imgs.to(device), labels.to(device).float()
+        outputs = model(imgs)
 
         # if testing for accuracy, round outputs; else add dim to labels
         if (mode == "test"):
@@ -98,13 +100,19 @@ if __name__ == "__main__":
     parser.add_argument('--out_dir', type=str, help='where to save checkpoints',default="./")
     parser.add_argument('--batch-size', type=int, default=32,
                         help='batch size [default=32]')
-    parser.add_argument('--lr_rt', type=float, default=2e-4,
+    parser.add_argument('--lr', type=float, default=2e-4,
                         help='learning rate [default: 2e-4]')
     parser.add_argument('--epochs', type=int, default=200,
                         help='number of training epochs [default: 200]')
     parser.add_argument('--seed', type=int, default=42,
                         help='random seed [default: 42]')
     parser.add_argument('--cuda', action='store_true', help='Enable cuda')
+    # for GAN
+    parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
+    parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
+    parser.add_argument("--latent_dim", type=int, default=100, help="dimensionality of the latent space")
+    parser.add_argument("--sample_interval", type=int, default=400, help="interval betwen image samples")
+
     args = parser.parse_args()
     args.cuda = args.cuda and torch.cuda.is_available()
     device = torch.device('cuda' if args.cuda else 'cpu')
@@ -112,18 +120,72 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    # setup datasets, data loaders, and model
+    # train, validate, test
     cf = True
 
     train_dataset = CausalMNIST(split="train", cf=cf)
     train_loader = DataLoader(train_dataset, shuffle=True, batch_size=args.batch_size)
 
-    valid_dataset = CausalMNIST(split="validate", cf=cf)
-    valid_loader = DataLoader(valid_dataset, shuffle=True, batch_size=args.batch_size)
+    # GAN
+    adversarial_loss = torch.nn.BCELoss()
+    generator = Generator(latent_dim=args.latent_dim, cf=cf)
+    discriminator = Discriminator(cf=cf)
+    optimizer_g = torch.optim.Adam(generator.parameters(), lr=args.lr, betas=(args.b1, args.b2))
+    optimizer_d = torch.optim.Adam(discriminator.parameters(), lr=args.lr, betas=(args.b1, args.b2))
 
+    # necessary?
+    from torch.autograd import Variable
+    Tensor = torch.cuda.FloatTensor if args.cuda else torch.FloatTensor
+
+    for epoch in range(int(args.epochs)):
+        for i, (imgs, labels) in enumerate(train_loader):
+            imgs,labels = imgs.to(device), labels.to(device)
+
+            # Adversarial ground truths
+            valid = Variable(Tensor(imgs.size(0), 1).fill_(1.0), requires_grad=False)
+            fake = Variable(Tensor(imgs.size(0), 1).fill_(0.0), requires_grad=False)
+            
+            # convert inputs
+            real_imgs = Variable(imgs.type(Tensor))
+
+            # train generator
+            optimizer_g.zero_grad() # does this always need to come first?
+            
+            z = Variable(Tensor(np.random.normal(0, 1, (imgs.shape[0], args.latent_dim))))
+            gen_imgs = generator(z)
+
+            g_loss = adversarial_loss(discriminator(gen_imgs), valid)
+            g_loss.backward()
+            optimizer_g.step()
+
+            # train discriminator
+            real_loss = adversarial_loss(discriminator(real_imgs), valid)
+            fake_loss = adversarial_loss(discriminator(gen_imgs.detach()), fake)
+            d_loss = (real_loss + fake_loss) / 2
+
+            d_loss.backward()
+            optimizer_d.step()
+
+            # later: replace with pbar, integrate with run method above
+            print(
+                "[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f]"
+                % (epoch, args.epochs, i, len(train_loader), d_loss.item(), g_loss.item())
+            )
+
+            batches_done = epoch * len(train_loader) + i
+            if batches_done % args.sample_interval == 0:
+                save_image(gen_imgs.data[:25], "images/%d.png" % batches_done, nrow=5)
+                save_image(torch.from_numpy(joined_img), str(i) + ".jpg")
+                
+
+    # LOGISTIC REGRESSION
+    """
     log_reg = LogisticRegression(cf)
     log_reg = log_reg.to(device)
-    optimizer = torch.optim.Adam(log_reg.parameters(), lr=args.lr_rt)
+    optimizer = torch.optim.Adam(log_reg.parameters(), lr=args.lr)
+
+    valid_dataset = CausalMNIST(split="validate", cf=cf)
+    valid_loader = DataLoader(valid_dataset, shuffle=True, batch_size=args.batch_size)
 
     # train and validate, keeping track of best loss in validation
     best_loss = float('inf')
@@ -157,3 +219,4 @@ if __name__ == "__main__":
     _,_,state_dict = load_checkpoint(folder=args.out_dir)
     test_model.load_state_dict(state_dict)
     run_epoch(test_loader, test_model, "test")
+    """

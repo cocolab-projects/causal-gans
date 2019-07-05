@@ -28,7 +28,6 @@ DATA_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), "../data")
 # "CE": probability of roof being wet, due to rain
 # "bE": probability of mike throwing water balloon at roof
 
-
 p = {"causal": .5, "C": .8, "noC": .8, "cE": .6, "bE": .5}
 event_functions = { "causal": lambda x: x**2,
                     "C": lambda x: (x+1)**2,
@@ -38,8 +37,10 @@ event_functions = { "causal": lambda x: x**2,
                     }
 TOTAL_NUM_WORLDS = len(p) + 1
 
-SQR_DIM = 32
-BLK_SQR = np.zeros((SQR_DIM,SQR_DIM))
+CORNER_DIM = 32
+IMG_DIM = CORNER_DIM*2
+BLK_SQR = np.zeros((CORNER_DIM,CORNER_DIM))
+
 MIN_COLOR = 0.0
 MAX_COLOR = 255.0
 
@@ -134,7 +135,7 @@ def load_mnist(root):
             root=root,
             train=True,
             download=True,
-            transform=transform.Compose([transform.Resize(SQR_DIM), transform.ToTensor()])
+            transform=transform.Compose([transform.Resize(CORNER_DIM), transform.ToTensor()])
         ),
         batch_size = 500,
         shuffle=False
@@ -145,7 +146,7 @@ def load_mnist(root):
             root=root,
             train=True,
             download=True,
-            transform=transform.Compose([transform.Resize(SQR_DIM), transform.ToTensor()])
+            transform=transform.Compose([transform.Resize(CORNER_DIM), transform.ToTensor()])
         ),
         batch_size = 500,
         shuffle=False
