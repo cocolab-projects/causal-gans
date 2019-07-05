@@ -14,7 +14,7 @@ import torch
 import torch.utils.data
 import torchvision.datasets as dset
 import torchvision.transforms as transform
-import torchvision.utils as utils
+from torchvision.utils import save_image
 
 import pdb
 
@@ -66,7 +66,7 @@ def generate_worlds(mnist, n=1, cf = False):
         scenarios.append((img, label))
         if (n is 1): return scenarios[0]
 
-        # utils.save_image(torch.from_numpy(joined_img), str(i) + ".jpg")
+        # save_image(torch.from_numpy(joined_img), str(i) + ".jpg")
     return scenarios
 
 def num_from_mnist(digit, mnist):

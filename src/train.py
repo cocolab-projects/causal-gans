@@ -174,9 +174,8 @@ if __name__ == "__main__":
 
             batches_done = epoch * len(train_loader) + i
             if batches_done % args.sample_interval == 0:
-                save_image(gen_imgs.data[:25], "images/%d.png" % batches_done, nrow=5)
-                save_image(torch.from_numpy(joined_img), str(i) + ".jpg")
-                
+                save_image(gen_imgs.data[:25], "%d.png" % batches_done, nrow=5)
+                #save_image(torch.from_numpy(joined_img), str(i) + ".jpg")
 
     # LOGISTIC REGRESSION
     """
