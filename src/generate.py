@@ -47,7 +47,7 @@ MAX_COLOR = 255.0
 # why do we vary "causal"?
 # causal entity or process
 # to do: clean up handling of case where cf
-def generate_worlds(mnist, n=1, cf = False):
+def generate_worlds(mnist, n=1, cf = False, transform=True):
 
     scenarios = [] # a scenario is an actual world and its cfs
     for i in range(n):

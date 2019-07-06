@@ -93,6 +93,7 @@ def load_checkpoint(folder='./', filename='model_best.pth.tar'):
     model = checkpoint['model']
     return epoch, track_loss, model
 
+# todo: consider preprocessing (center pixels around 0, ensure |value| \leq 1)
 if __name__ == "__main__":
     # handle args
     import argparse
@@ -102,8 +103,10 @@ if __name__ == "__main__":
                         help='batch size [default=32]')
     parser.add_argument('--lr', type=float, default=2e-4,
                         help='learning rate [default: 2e-4]')
-    parser.add_argument('--epochs', type=int, default=200,
-                        help='number of training epochs [default: 200]')
+    parser.add_argument('--lr_d', type=float, default=2e-5,
+                    help='discriminator learning rate [default: 2e-5]')
+    parser.add_argument('--epochs', type=int, default=50,
+                        help='number of training epochs [default: 50]')
     parser.add_argument('--seed', type=int, default=42,
                         help='random seed [default: 42]')
     parser.add_argument('--cuda', action='store_true', help='Enable cuda')
@@ -121,9 +124,10 @@ if __name__ == "__main__":
     np.random.seed(args.seed)
 
     # train, validate, test
-    cf = True
+    cf = False
+    transform = False
 
-    train_dataset = CausalMNIST(split="train", cf=cf)
+    train_dataset = CausalMNIST(split="train", cf=cf, transform=transform)
     train_loader = DataLoader(train_dataset, shuffle=True, batch_size=args.batch_size)
 
     # GAN
@@ -131,10 +135,9 @@ if __name__ == "__main__":
     generator = Generator(latent_dim=args.latent_dim, cf=cf)
     discriminator = Discriminator(cf=cf)
     optimizer_g = torch.optim.Adam(generator.parameters(), lr=args.lr, betas=(args.b1, args.b2))
-    optimizer_d = torch.optim.Adam(discriminator.parameters(), lr=args.lr, betas=(args.b1, args.b2))
+    optimizer_d = torch.optim.Adam(discriminator.parameters(), lr=args.lr_d, betas=(args.b1, args.b2))
 
     # necessary?
-    from torch.autograd import Variable
     Tensor = torch.cuda.FloatTensor if args.cuda else torch.FloatTensor
 
     for epoch in range(int(args.epochs)):
@@ -142,19 +145,19 @@ if __name__ == "__main__":
             imgs,labels = imgs.to(device), labels.to(device)
 
             # Adversarial ground truths
-            valid = Variable(Tensor(imgs.size(0), 1).fill_(1.0), requires_grad=False)
-            fake = Variable(Tensor(imgs.size(0), 1).fill_(0.0), requires_grad=False)
+            with torch.no_grad():
+                valid = Tensor(imgs.size(0), 1).fill_(1.0)
+                fake = Tensor(imgs.size(0), 1).fill_(0.0)
             
             # convert inputs
-            real_imgs = Variable(imgs.type(Tensor))
+            real_imgs = imgs.type(Tensor)
 
-            # train generator
-            optimizer_g.zero_grad() # does this always need to come first?
-            
-            z = Variable(Tensor(np.random.normal(0, 1, (imgs.shape[0], args.latent_dim))))
+            # train generator           
+            z = Tensor(np.random.normal(0, 1, (imgs.shape[0], args.latent_dim)))
             gen_imgs = generator(z)
-
             g_loss = adversarial_loss(discriminator(gen_imgs), valid)
+
+            optimizer_g.zero_grad()
             g_loss.backward()
             optimizer_g.step()
 
@@ -163,6 +166,7 @@ if __name__ == "__main__":
             fake_loss = adversarial_loss(discriminator(gen_imgs.detach()), fake)
             d_loss = (real_loss + fake_loss) / 2
 
+            optimizer_d.zero_grad()
             d_loss.backward()
             optimizer_d.step()
 
@@ -175,7 +179,6 @@ if __name__ == "__main__":
             batches_done = epoch * len(train_loader) + i
             if batches_done % args.sample_interval == 0:
                 save_image(gen_imgs.data[:25], "%d.png" % batches_done, nrow=5)
-                #save_image(torch.from_numpy(joined_img), str(i) + ".jpg")
 
     # LOGISTIC REGRESSION
     """
