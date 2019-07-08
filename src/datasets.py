@@ -9,17 +9,17 @@ from torchvision import transforms
 
 from generate import mnist_dir_setup, generate_worlds
 
-TRAIN_SET_SZ = 1000
-TEST_SET_SZ = 125
-VAL_SET_SZ = 125
+TRAIN_SET_SZ = 5000
+VAL_SET_SZ = 1000
+TEST_SET_SZ = 1000
 
 DATA_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), "../data")
 CAUSAL_MNIST_DIR = os.path.join(DATA_DIR, 'causal_mnist')
 
 class CausalMNIST(Dataset):
 	# later: add vocab
-	def __init__(self, root=CAUSAL_MNIST_DIR, split="train",
-		channels=1, classes=None, target_trials_only=False):
+	def __init__(self, split, root=CAUSAL_MNIST_DIR,
+		channels=1, classes=None, target_trials_only=False, cf=False, transform=True):
 		super(CausalMNIST, self).__init__()
 		self.root = root
 		self.mnist = mnist_dir_setup(split == "train")
@@ -34,9 +34,10 @@ class CausalMNIST(Dataset):
 		else:
 			raise RuntimeError("CausalMNIST was expecting split to be 'train', 'test', or 'validate'.")
 		
-		data = [generate_worlds(self.mnist) for i in range(self.length)]
-		self.imgs = [self.img_transform(Image.fromarray(pt[0])) for pt in data]
-		self.labels = ["causal" in pt[1] for pt in data]
+		scenarios = generate_worlds(self.mnist, n=self.length, cf=cf, transform=transform)
+		self.imgs = [self.img_transform(Image.fromarray(scenarios[i][0])) for i in range(self.length)]
+		
+		self.labels = ["causal" in pt[1] for pt in scenarios]
 
 	def __getitem__(self, index):
 		return self.imgs[index], self.labels[index]
