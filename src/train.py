@@ -4,8 +4,6 @@ train.py
 @author mmosse19
 @version July 2019
 """
-import pdb
-
 import os
 import numpy as np
 from tqdm import tqdm
@@ -21,7 +19,7 @@ from models import (LogisticRegression, Generator, Discriminator)
 from utils import (AverageMeter, save_checkpoint, free_params, frozen_params)
 
 # single pass over the data
-def loop(loader, model, mode, pbar=None):
+def log_reg_loop(loader, model, mode, pbar=None):
     loss_meter = AverageMeter()
     causal_loss_meter = AverageMeter()
     
@@ -65,16 +63,16 @@ def loop(loader, model, mode, pbar=None):
 
     return loss_meter.avg, causal_loss_meter.avg
 
-def run_epoch(loader, model, mode, epoch=0):
+def log_reg_run_epoch(loader, model, mode, epoch=0):
     if (mode == "train"):
         model.train()
         pbar = tqdm(total=len(loader))
-        avg_loss, _ = loop(loader, model, mode, pbar)
+        avg_loss, _ = log_reg_loop(loader, model, mode, pbar)
         pbar.close()
     else:
         model.eval()
         with torch.no_grad():
-            avg_loss, avg_causal_loss = loop(loader, model, mode)
+            avg_loss, avg_causal_loss = log_reg_loop(loader, model, mode)
 
     if (mode=="test"):
             print('====> test accuracy: {}%'.format(to_percent(avg_loss)))
@@ -110,11 +108,12 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=42,
                         help='random seed [default: 42]')
     parser.add_argument('--cuda', action='store_true', help='Enable cuda')
-    # for GAN
+    # for GANs
     parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
     parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
-    parser.add_argument("--latent_dim", type=int, default=100, help="dimensionality of the latent space")
+    parser.add_argument("--latent_dim", type=int, default=5, help="dimensionality of the latent space")
     parser.add_argument("--sample_interval", type=int, default=400, help="interval betwen image samples")
+    parser.add_argument("--n_critic", type=int, default=5, help="number of training steps for discriminator per iter")
 
     args = parser.parse_args()
     args.cuda = args.cuda and torch.cuda.is_available()
@@ -126,16 +125,22 @@ if __name__ == "__main__":
     # train, validate, test
     cf = False
     transform = False
+    Wasserstein = False
 
     train_dataset = CausalMNIST(split="train", cf=cf, transform=transform)
     train_loader = DataLoader(train_dataset, shuffle=True, batch_size=args.batch_size)
 
-    # GAN
+    # GANs
     adversarial_loss = torch.nn.BCELoss()
+
     generator = Generator(latent_dim=args.latent_dim, cf=cf)
     discriminator = Discriminator(cf=cf)
-    optimizer_g = torch.optim.Adam(generator.parameters(), lr=args.lr, betas=(args.b1, args.b2))
-    optimizer_d = torch.optim.Adam(discriminator.parameters(), lr=args.lr_d, betas=(args.b1, args.b2))
+    if (Wasserstein):
+        optimizer_g = torch.optim.RMSprop(generator.parameters(), lr=args.lr)
+        optimizer_d = torch.optim.RMSprop(discriminator.parameters(), lr=args.lr)
+    else:
+        optimizer_g = torch.optim.Adam(generator.parameters(), lr=args.lr, betas=(args.b1, args.b2))
+        optimizer_d = torch.optim.Adam(discriminator.parameters(), lr=args.lr_d, betas=(args.b1, args.b2))
 
     # necessary?
     Tensor = torch.cuda.FloatTensor if args.cuda else torch.FloatTensor
@@ -149,32 +154,49 @@ if __name__ == "__main__":
                 valid = Tensor(imgs.size(0), 1).fill_(1.0)
                 fake = Tensor(imgs.size(0), 1).fill_(0.0)
             
-            # convert inputs
+            # Convert inputs
             real_imgs = imgs.type(Tensor)
 
-            # train generator           
+            # generate images      
             z = Tensor(np.random.normal(0, 1, (imgs.shape[0], args.latent_dim)))
-            gen_imgs = generator(z)
-            g_loss = adversarial_loss(discriminator(gen_imgs), valid)
-
-            optimizer_g.zero_grad()
-            g_loss.backward()
-            optimizer_g.step()
+            with torch.no_grad():
+                gen_imgs = generator(z)
 
             # train discriminator
-            real_loss = adversarial_loss(discriminator(real_imgs), valid)
-            fake_loss = adversarial_loss(discriminator(gen_imgs.detach()), fake)
-            d_loss = (real_loss + fake_loss) / 2
+            if (Wasserstein):
+                loss_d = -torch.mean(discriminator(real_imgs)) + torch.mean(discriminator(gen_imgs))
+            else:
+                real_loss = adversarial_loss(discriminator(real_imgs), valid)
+                fake_loss = adversarial_loss(discriminator(gen_imgs.detach()), fake)
+                loss_d = (real_loss + fake_loss) / 2
 
             optimizer_d.zero_grad()
-            d_loss.backward()
+            loss_d.backward()
             optimizer_d.step()
 
-            # later: replace with pbar, integrate with run method above
-            print(
-                "[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f]"
-                % (epoch, args.epochs, i, len(train_loader), d_loss.item(), g_loss.item())
-            )
+            # clip discriminator if W
+            if (Wasserstein):
+                for p in discriminator.parameters():
+                    p.data.clamp_(-args.clip_value,args.clip_value)
+
+            # train generator
+            if not Wasserstein or i % args.n_critic == 0:
+                gen_imgs = generator(z)
+
+                if (Wasserstein):
+                    loss_g = -torch.mean(discriminator(gen_imgs))
+                else:
+                    loss_g = adversarial_loss(discriminator(gen_imgs), valid)
+
+                optimizer_g.zero_grad()
+                loss_g.backward()
+                optimizer_g.step()
+
+                # later: replace with pbar, integrate with run method above
+                print(
+                    "[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f]"
+                    % (epoch, args.epochs, i, len(train_loader), loss_d.item(), loss_g.item())
+                )
 
             batches_done = epoch * len(train_loader) + i
             if batches_done % args.sample_interval == 0:
@@ -195,8 +217,8 @@ if __name__ == "__main__":
 
     for epoch in range(int(args.epochs)):
 
-        train_loss = run_epoch(train_loader, log_reg, "train", epoch)
-        validate_loss = run_epoch(valid_loader, log_reg, "validate", epoch)
+        train_loss = log_reg_run_epoch(train_loader, log_reg, "train", epoch)
+        validate_loss = log_reg_run_epoch(valid_loader, log_reg, "validate", epoch)
 
         is_best = validate_loss < best_loss
         best_loss = min(validate_loss, best_loss)
