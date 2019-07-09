@@ -220,9 +220,9 @@ if __name__ == "__main__":
     # train
     for epoch in range(int(args.epochs)):
         if (attach_classifier):
-            model.train()
+            log_reg.train()
             pbar = tqdm(total=len(train_loader))
-        
+
         for i, (imgs, labels) in enumerate(train_loader):
             imgs,labels = imgs.to(device), labels.to(device)
 
@@ -268,6 +268,26 @@ if __name__ == "__main__":
             batches_done = epoch * len(train_loader) + i
             if batches_done % args.sample_interval == 0:
                 save_image(gen_imgs.data[:25], "%d.png" % batches_done, nrow=5)
+        
+        # todo: add training for log reg
+        # todo: decompose, check variable names here:
+        if (attach_classifier):
+            pbar.close()
+            validate_loss = log_reg_run_epoch(valid_loader, log_reg, "validate", epoch)
+            
+            is_best = validate_loss < best_loss
+            best_loss = min(validate_loss, best_loss)
+            track_loss[epoch, 0] = train_loss
+            track_loss[epoch, 1] = validate_loss
+            
+            save_checkpoint({
+                'epoch': epoch,
+                'model': log_reg.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'track_loss': track_loss,
+                'cmd_line_args': args,
+                'seed': args.seed
+            }, is_best, folder = args.out_dir)
 
     # test
     test_dataset = CausalMNIST(split='test',cf=cf)
