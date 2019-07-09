@@ -172,6 +172,13 @@ def handle_args():
                         help="number of training steps for discriminator per iter")
     return parser.parse_args()
 
+print_progress(epoch, epochs, batch, num_batches, loss_d, attached_classifier, loss_g)
+    print(
+        "[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G{} loss: %f]"
+        % (epoch, epochs, batch, num_batches, len(train_loader),
+            loss_d, attached_classifier, loss_g)
+    )
+
 # todo: consider preprocessing (center pixels around 0, ensure |value| \leq 1)
 if __name__ == "__main__":
     # args
@@ -196,10 +203,26 @@ if __name__ == "__main__":
     optimizer_g = generator.optimizer(generator.parameters(), lr=args.lr)
     optimizer_d = discriminator.optimizer(discriminator.parameters(), lr=args.lr)
 
+    if (attach_classifier):
+        log_reg = LogisticRegression(cf).to(device)
+        optimizer_log = torch.optim.Adam(log_reg.parameters(), lr=args.lr, betas=(args.b1, args.b2))
+
+        valid_dataset = CausalMNIST(split="validate", cf=cf)
+        valid_loader = DataLoader(valid_dataset, shuffle=True, batch_size=args.batch_size)
+
+        # train and validate, keeping track of best loss in validation
+        best_loss = float('inf')
+        track_loss = np.zeros((args.epochs, 2))
+
     # necessary?
     Tensor = torch.cuda.FloatTensor if args.cuda else torch.FloatTensor
 
+    # train
     for epoch in range(int(args.epochs)):
+        if (attach_classifier):
+            model.train()
+            pbar = tqdm(total=len(train_loader))
+        
         for i, (imgs, labels) in enumerate(train_loader):
             imgs,labels = imgs.to(device), labels.to(device)
 
@@ -226,25 +249,38 @@ if __name__ == "__main__":
             if not wass or i % args.n_critic == 0:
                 gen_imgs = generator(z)
 
-                loss_g = get_loss_g(wass, discriminator, gen_imgs, valid)
+                loss = get_loss_g(wass, discriminator, gen_imgs, valid)
+                if (attach_classifier):
+                    loss +=
+                    optimizer_log.zero_grad()
+
                 optimizer_g.zero_grad()
-                loss_g.backward()
+                loss.backward()
                 optimizer_g.step()
 
-                # later: replace with pbar, integrate with run method above
-                print(
-                    "[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G loss: %f]"
-                    % (epoch, args.epochs, i, len(train_loader), loss_d.item(), loss_g.item())
-                )
+                if(attach_classifier):
+                    optimizer_log.step()
+
+
+                print_progress(epoch, args.epochs, i, len(train_loader), loss_d.item(),
+                                "/C" if attach_classifier else "", loss.item())
 
             batches_done = epoch * len(train_loader) + i
             if batches_done % args.sample_interval == 0:
                 save_image(gen_imgs.data[:25], "%d.png" % batches_done, nrow=5)
 
+    # test
+    test_dataset = CausalMNIST(split='test',cf=cf)
+    test_loader = DataLoader(test_dataset, shuffle=True, batch_size=args.batch_size)
+
+    test_model = LogisticRegression(cf)
+    _,_,state_dict = load_checkpoint(folder=args.out_dir)
+    test_model.load_state_dict(state_dict)
+    run_epoch(test_loader, test_model, "test")
+
     # LOGISTIC REGRESSION
     """
-    log_reg = LogisticRegression(cf)
-    log_reg = log_reg.to(device)
+    log_reg = LogisticRegression(cf).to(device)
     optimizer = torch.optim.Adam(log_reg.parameters(), lr=args.lr, betas=(args.b1, args.b2))
 
     valid_dataset = CausalMNIST(split="validate", cf=cf)
