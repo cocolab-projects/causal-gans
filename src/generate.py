@@ -171,9 +171,6 @@ def mnist_dir_setup(train):
     train_mnist, test_mnist = load_mnist(DATA_DIR)
     return train_mnist if train else test_mnist
 
-"""
-
-"""
 if __name__ ==  "__main__":
     import argparse
     # handle args
