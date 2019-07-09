@@ -1,6 +1,8 @@
 """
 train.py
 
+Credit for GAN code goes to eriklindernoren
+
 @author mmosse19
 @version July 2019
 """
@@ -16,7 +18,7 @@ from torchvision.utils import save_image
 
 from datasets import CausalMNIST
 from models import (LogisticRegression, Generator, Discriminator)
-from utils import (AverageMeter, save_checkpoint, free_params, frozen_params)
+from utils import (AverageMeter, save_checkpoint, free_params, frozen_params, to_percent)
 
 # single pass over the data
 def log_reg_loop(loader, model, mode, pbar=None):
@@ -81,9 +83,6 @@ def log_reg_run_epoch(loader, model, mode, epoch=0):
             print('====> {} epoch: {}\tloss: {:.4f}'.format(mode, epoch, avg_loss))
     return avg_loss
 
-def to_percent(float):
-    return np.around(float*100, decimals=2)
-
 def load_checkpoint(folder='./', filename='model_best.pth.tar'):
     checkpoint = torch.load(folder + filename)
     epoch = checkpoint['epoch']
@@ -91,56 +90,111 @@ def load_checkpoint(folder='./', filename='model_best.pth.tar'):
     model = checkpoint['model']
     return epoch, track_loss, model
 
-# todo: consider preprocessing (center pixels around 0, ensure |value| \leq 1)
-if __name__ == "__main__":
-    # handle args
+def nearby(pertburbation, z, eps):
+    return False
+
+def latent_cf(perturbation, z):
+    return z
+
+# z has shape (batch-size, latent_dim)
+def latent_cfs(z, eps):
+    latent_dim = z.size(1)
+    cfs = []
+
+    component_dist_weights = [.5, .5]
+    prior_mean = 0
+    prior_scale = 1
+    for i in range(latent_dim):
+        posterior_mean = z[:,i]
+        posterior_scale = unnkown
+        means = [prior_mean, posterior_mean]
+        scales = [prior_scale, posterior_scale]
+
+        perturbation = pyro.distributions.MixtureOfDiagNormals(means, scales, component_dist_weights)
+        while nearby(perturbation, z, eps):
+            perturbation = pyro.distributions.MixtureOfDiagNormals(means, scales, component_dist_weights)
+        cfs.append(latent_cf(perturbation, z))
+    return cfs
+
+def get_loss_d(wass, discriminator, imgs, gen_imgs, valid, fake):
+    imgs = imgs.type(Tensor)
+    if (wass):
+        return -torch.mean(discriminator(imgs)) + torch.mean(discriminator(gen_imgs))
+    else:
+        with torch.no_grad():
+            real_loss = torch.nn.BCELoss(discriminator(imgs), valid)
+            fake_loss = torch.nn.BCELoss(discriminator(gen_imgs), fake)
+            return (real_loss + fake_loss) / 2
+
+def get_loss_g(wass, discriminator, gen_imgs, valid):
+    if (wass):
+        return -torch.mean(discriminator(gen_imgs))
+    else:
+        return torch.nn.BCELoss(discriminator(gen_imgs), valid)
+
+def clip_discriminator(discriminator, clip_value):
+    for p in discriminator.parameters():
+        p.data.clamp_(-clip_value,clip_value)
+
+def handle_args():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--out_dir', type=str, help='where to save checkpoints',default="./")
-    parser.add_argument('--batch-size', type=int, default=32,
-                        help='batch size [default=32]')
+    parser.add_argument('--out_dir', type=str,
+                        help='where to save checkpoints',default="./")
+    parser.add_argument('--seed', type=int, default=42,
+                        help='random seed [default: 42]')
+    parser.add_argument('--resample_eps', type=float, default=1e-3,
+                        help='epsilon ball to resample z')
+    # for learning
+    parser.add_argument('--batch-size', type=int, default=64,
+                        help='batch size [default=64]')
     parser.add_argument('--lr', type=float, default=2e-4,
                         help='learning rate [default: 2e-4]')
     parser.add_argument('--lr_d', type=float, default=2e-5,
-                    help='discriminator learning rate [default: 2e-5]')
+                        help='discriminator learning rate [default: 2e-5]')
     parser.add_argument('--epochs', type=int, default=50,
                         help='number of training epochs [default: 50]')
-    parser.add_argument('--seed', type=int, default=42,
-                        help='random seed [default: 42]')
-    parser.add_argument('--cuda', action='store_true', help='Enable cuda')
-    # for GANs
-    parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
-    parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
-    parser.add_argument("--latent_dim", type=int, default=5, help="dimensionality of the latent space")
-    parser.add_argument("--sample_interval", type=int, default=400, help="interval betwen image samples")
-    parser.add_argument("--n_critic", type=int, default=5, help="number of training steps for discriminator per iter")
+    parser.add_argument('--cuda', action='store_true',
+                        help='Enable cuda')
+    parser.add_argument("--b1", type=float, default=0.5,
+                        help="adam: decay of first order momentum of gradient")
+    parser.add_argument("--b2", type=float, default=0.999,
+                        help="adam: decay of first order momentum of gradient")
 
-    args = parser.parse_args()
+    # for GANs
+    parser.add_argument("--latent_dim", type=int, default=5,
+                        help="dimensionality of the latent space")
+    parser.add_argument("--sample_interval", type=int, default=500,
+                        help="interval betwen image samples")
+    parser.add_argument("--clip_value", type=float, default=0.01,
+                        help="lower and upper clip value for disc. weights")
+    parser.add_argument("--n_critic", type=int, default=5,
+                        help="number of training steps for discriminator per iter")
+    return parser.parse_args()
+
+# todo: consider preprocessing (center pixels around 0, ensure |value| \leq 1)
+if __name__ == "__main__":
+    # args
+    args = handle_args()
     args.cuda = args.cuda and torch.cuda.is_available()
     device = torch.device('cuda' if args.cuda else 'cpu')
-
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
     # train, validate, test
     cf = False
     transform = False
-    Wasserstein = False
+    wass = True
+    attach_classifier = False
 
     train_dataset = CausalMNIST(split="train", cf=cf, transform=transform)
     train_loader = DataLoader(train_dataset, shuffle=True, batch_size=args.batch_size)
 
-    # GANs
-    adversarial_loss = torch.nn.BCELoss()
-
-    generator = Generator(latent_dim=args.latent_dim, cf=cf)
-    discriminator = Discriminator(cf=cf)
-    if (Wasserstein):
-        optimizer_g = torch.optim.RMSprop(generator.parameters(), lr=args.lr)
-        optimizer_d = torch.optim.RMSprop(discriminator.parameters(), lr=args.lr)
-    else:
-        optimizer_g = torch.optim.Adam(generator.parameters(), lr=args.lr, betas=(args.b1, args.b2))
-        optimizer_d = torch.optim.Adam(discriminator.parameters(), lr=args.lr_d, betas=(args.b1, args.b2))
+    # GAN
+    generator = Generator(latent_dim=args.latent_dim, cf=cf, wass=wass)
+    discriminator = Discriminator(cf=cf, wass=wass)
+    optimizer_g = generator.optimizer(generator.parameters(), lr=args.lr)
+    optimizer_d = discriminator.optimizer(discriminator.parameters(), lr=args.lr)
 
     # necessary?
     Tensor = torch.cuda.FloatTensor if args.cuda else torch.FloatTensor
@@ -149,13 +203,10 @@ if __name__ == "__main__":
         for i, (imgs, labels) in enumerate(train_loader):
             imgs,labels = imgs.to(device), labels.to(device)
 
-            # Adversarial ground truths
+            # adversarial ground truths
             with torch.no_grad():
                 valid = Tensor(imgs.size(0), 1).fill_(1.0)
                 fake = Tensor(imgs.size(0), 1).fill_(0.0)
-            
-            # Convert inputs
-            real_imgs = imgs.type(Tensor)
 
             # generate images      
             z = Tensor(np.random.normal(0, 1, (imgs.shape[0], args.latent_dim)))
@@ -163,31 +214,19 @@ if __name__ == "__main__":
                 gen_imgs = generator(z)
 
             # train discriminator
-            if (Wasserstein):
-                loss_d = -torch.mean(discriminator(real_imgs)) + torch.mean(discriminator(gen_imgs))
-            else:
-                real_loss = adversarial_loss(discriminator(real_imgs), valid)
-                fake_loss = adversarial_loss(discriminator(gen_imgs.detach()), fake)
-                loss_d = (real_loss + fake_loss) / 2
-
+            loss_d = get_loss_d(wass, discriminator, imgs, gen_imgs, valid, fake)
             optimizer_d.zero_grad()
             loss_d.backward()
             optimizer_d.step()
 
-            # clip discriminator if W
-            if (Wasserstein):
-                for p in discriminator.parameters():
-                    p.data.clamp_(-args.clip_value,args.clip_value)
+            # clip discriminator if wass
+            if (wass): clip_discriminator(discriminator, args.clip_value)
 
-            # train generator
-            if not Wasserstein or i % args.n_critic == 0:
+            # train generator (and log_reg)
+            if not wass or i % args.n_critic == 0:
                 gen_imgs = generator(z)
 
-                if (Wasserstein):
-                    loss_g = -torch.mean(discriminator(gen_imgs))
-                else:
-                    loss_g = adversarial_loss(discriminator(gen_imgs), valid)
-
+                loss_g = get_loss_g(wass, discriminator, gen_imgs, valid)
                 optimizer_g.zero_grad()
                 loss_g.backward()
                 optimizer_g.step()
@@ -206,7 +245,7 @@ if __name__ == "__main__":
     """
     log_reg = LogisticRegression(cf)
     log_reg = log_reg.to(device)
-    optimizer = torch.optim.Adam(log_reg.parameters(), lr=args.lr)
+    optimizer = torch.optim.Adam(log_reg.parameters(), lr=args.lr, betas=(args.b1, args.b2))
 
     valid_dataset = CausalMNIST(split="validate", cf=cf)
     valid_loader = DataLoader(valid_dataset, shuffle=True, batch_size=args.batch_size)

@@ -34,3 +34,6 @@ def free_params(module):
 def frozen_params(module):
     for p in module.parameters():
         p.requires_grad = False
+
+def to_percent(float):
+    return np.around(float*100, decimals=2)

@@ -18,8 +18,11 @@ class LogisticRegression(nn.Module):
         return torch.sigmoid(outputs)
 
 class Generator(nn.Module):
-    def __init__(self, latent_dim, cf=True, n_channels =1, img_height=IMG_DIM, img_width=IMG_DIM):
+    def __init__(self, latent_dim, cf=True, wass=False, n_channels =1, img_height=IMG_DIM, img_width=IMG_DIM):
         super(Generator, self).__init__()
+
+        self.optimizer = torch.optim.RMSprop if wass else torch.optim.Adam
+
         if (cf): img_height *= TOTAL_NUM_WORLDS
         self.img_shape = (n_channels, img_height, img_width)
 
@@ -46,8 +49,11 @@ class Generator(nn.Module):
         return img
 
 class Discriminator(nn.Module):
-    def __init__(self, cf=True, input_dim=IMG_DIM, n_channels =1, img_height=IMG_DIM, img_width=IMG_DIM):
+    def __init__(self, cf=True, wass=False, input_dim=IMG_DIM, n_channels =1, img_height=IMG_DIM, img_width=IMG_DIM):
         super(Discriminator, self).__init__()
+
+        self.optimizer = torch.optim.RMSprop if wass else torch.optim.Adam
+
         if (cf): img_height *= TOTAL_NUM_WORLDS
         self.img_shape = (n_channels, img_height, img_width)
         
