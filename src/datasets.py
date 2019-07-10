@@ -9,7 +9,7 @@ from torchvision import transforms
 
 from generate import mnist_dir_setup, generate_worlds
 
-TRAIN_SET_SZ = 5000
+TRAIN_SET_SZ = 5000  # note: we might need more when we are training GAN
 VAL_SET_SZ = 1000
 TEST_SET_SZ = 1000
 

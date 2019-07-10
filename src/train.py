@@ -20,7 +20,8 @@ from datasets import CausalMNIST
 from models import (LogisticRegression, Generator, Discriminator)
 from utils import (AverageMeter, save_checkpoint, free_params, frozen_params, to_percent)
 
-# single pass over the data
+CLASSIFIER_LOSS_WT = 1.0
+
 def log_reg_loop(loader, model, mode, pbar=None):
     loss_meter = AverageMeter()
     causal_loss_meter = AverageMeter()
@@ -60,17 +61,12 @@ def log_reg_loop(loader, model, mode, pbar=None):
             loss.backward()
             optimizer.step()
 
-            pbar.set_postfix({'loss': loss_meter.avg})
-            # pbar.update()
-
     return loss_meter.avg, causal_loss_meter.avg
 
 def log_reg_run_epoch(loader, model, mode, epoch=0):
     if (mode == "train"):
         model.train()
-        pbar = tqdm(total=len(loader))
-        avg_loss, _ = log_reg_loop(loader, model, mode, pbar)
-        pbar.close()
+        avg_loss, _ = log_reg_loop(loader, model, mode)
     else:
         model.eval()
         with torch.no_grad():
@@ -90,41 +86,14 @@ def load_checkpoint(folder='./', filename='model_best.pth.tar'):
     model = checkpoint['model']
     return epoch, track_loss, model
 
-def nearby(pertburbation, z, eps):
-    return False
-
-def latent_cf(perturbation, z):
-    return z
-
-# z has shape (batch-size, latent_dim)
-def latent_cfs(z, eps):
-    latent_dim = z.size(1)
-    cfs = []
-
-    component_dist_weights = [.5, .5]
-    prior_mean = 0
-    prior_scale = 1
-    for i in range(latent_dim):
-        posterior_mean = z[:,i]
-        posterior_scale = unnkown
-        means = [prior_mean, posterior_mean]
-        scales = [prior_scale, posterior_scale]
-
-        perturbation = pyro.distributions.MixtureOfDiagNormals(means, scales, component_dist_weights)
-        while nearby(perturbation, z, eps):
-            perturbation = pyro.distributions.MixtureOfDiagNormals(means, scales, component_dist_weights)
-        cfs.append(latent_cf(perturbation, z))
-    return cfs
-
 def get_loss_d(wass, discriminator, imgs, gen_imgs, valid, fake):
-    imgs = imgs.type(Tensor)
+    # imgs = imgs.type(Tensor)
     if (wass):
         return -torch.mean(discriminator(imgs)) + torch.mean(discriminator(gen_imgs))
     else:
-        with torch.no_grad():
-            real_loss = torch.nn.BCELoss(discriminator(imgs), valid)
-            fake_loss = torch.nn.BCELoss(discriminator(gen_imgs), fake)
-            return (real_loss + fake_loss) / 2
+        real_loss = torch.nn.BCELoss(discriminator(imgs), valid)
+        fake_loss = torch.nn.BCELoss(discriminator(gen_imgs), fake)
+        return (real_loss + fake_loss) / 2
 
 def get_loss_g(wass, discriminator, gen_imgs, valid):
     if (wass):
@@ -180,8 +149,9 @@ def print_progress(epoch, epochs, batch, num_batches, loss_d, attach_classifier,
         % (epoch, epochs, batch, num_batches, loss_d, temp, loss_g)
         )
 
-# TODO: consider preprocessing (center pixels around 0, ensure |value| \leq 1)
+# TODO: preprocessing (center pixels around 0, ensure |value| \leq 1)
 # TODO: make updates regular/more informative
+# TODO: save to numpy
 if __name__ == "__main__":
     # args
     args = handle_args()
@@ -202,6 +172,7 @@ if __name__ == "__main__":
     # GAN
     generator = Generator(latent_dim=args.latent_dim, cf=cf, wass=wass)
     discriminator = Discriminator(cf=cf, wass=wass)
+    # optimizer is set by constructor depending on the value of wass
     optimizer_g = generator.optimizer(generator.parameters(), lr=args.lr)
     optimizer_d = discriminator.optimizer(discriminator.parameters(), lr=args.lr)
 
@@ -216,10 +187,7 @@ if __name__ == "__main__":
         best_loss = float('inf')
         track_loss = np.zeros((args.epochs, 2))
 
-    # necessary?
-    Tensor = torch.cuda.FloatTensor if args.cuda else torch.FloatTensor
-
-    # train
+    # train (and validate, if attach_classifier)
     for epoch in range(int(args.epochs)):
         if (attach_classifier):
             log_reg.train()
@@ -228,16 +196,21 @@ if __name__ == "__main__":
             criterion_log_reg = torch.nn.BCELoss()
 
         for i, (imgs, labels) in enumerate(train_loader):
-            imgs,labels = imgs.to(device), labels.to(device)
+            batch_size = imgs.size(0)
 
+            imgs,labels = imgs.to(device), labels.to(device)
 
             # adversarial ground truths
             with torch.no_grad():
-                valid = Tensor(imgs.size(0), 1).fill_(1.0)
-                fake = Tensor(imgs.size(0), 1).fill_(0.0)
+                valid = torch.ones(img.size(0), 1, device=device)
+                fake = torch.zeros(img.size(0), 1, device=device)
+                # valid = torch.Tensor(imgs.size(0), 1).fill_(1.0).to(device)
+                # fake = torch.Tensor(imgs.size(0), 1).fill_(0.0).to(device)
 
             # generate images      
-            z = Tensor(np.random.normal(0, 1, (imgs.shape[0], args.latent_dim)))
+            # z = torch.Tensor(np.random.normal(0, 1, (args.batch_size, args.latent_dim))).to(device)
+            z = torch.randn(batch_size, args.latent_dim, device=device)
+
             with torch.no_grad():
                 gen_imgs = generator(z)
 
@@ -250,7 +223,8 @@ if __name__ == "__main__":
             # clip discriminator if wass
             if (wass): clip_discriminator(discriminator, args.clip_value)
 
-            # train generator (and log_reg)
+            # train generator (and log_reg if necessary)
+            # we do this unconditionally if GAN and periodically if WGAN
             if not wass or i % args.n_critic == 0:
                 gen_imgs = generator(z)
 
@@ -263,7 +237,7 @@ if __name__ == "__main__":
                     loss_log_reg_amt = loss_log_reg.item()
                     loss_meter.update(loss_log_reg_amt, train_loader.batch_size)
 
-                    loss_g += loss_log_reg
+                    loss_g += CLASSIFIER_LOSS_WT*loss_log_reg
                     optimizer_log_reg.zero_grad()
 
                 loss_g.backward()
@@ -279,8 +253,6 @@ if __name__ == "__main__":
             if batches_done % args.sample_interval == 0:
                 save_image(gen_imgs.data[:25], "%d.png" % batches_done, nrow=5)
         
-        # todo: add training for log reg
-        # todo: decompose, check variable names here:
         if (attach_classifier):
             validate_loss = log_reg_run_epoch(valid_loader, log_reg, "validate", epoch)
             
@@ -288,10 +260,11 @@ if __name__ == "__main__":
             track_loss[epoch, 0] = loss_log_reg
             track_loss[epoch, 1] = validate_loss
             
+            # TODO: save GAN and classifier
             save_checkpoint({
                 'epoch': epoch,
                 'model': log_reg.state_dict(),
-                'optimizer': optimizer.state_dict(),
+                'optimizer': optimizer_log_reg.state_dict(),
                 'track_loss': track_loss,
                 'cmd_line_args': args,
                 'seed': args.seed
@@ -304,46 +277,4 @@ if __name__ == "__main__":
     test_model = LogisticRegression(cf)
     _,_,state_dict = load_checkpoint(folder=args.out_dir)
     test_model.load_state_dict(state_dict)
-    run_epoch(test_loader, test_model, "test")
-
-    # LOGISTIC REGRESSION
-    """
-    log_reg = LogisticRegression(cf).to(device)
-    optimizer = torch.optim.Adam(log_reg.parameters(), lr=args.lr, betas=(args.b1, args.b2))
-
-    valid_dataset = CausalMNIST(split="validate", cf=cf)
-    valid_loader = DataLoader(valid_dataset, shuffle=True, batch_size=args.batch_size)
-
-    # train and validate, keeping track of best loss in validation
-    best_loss = float('inf')
-    track_loss = np.zeros((args.epochs, 2))
-
-    for epoch in range(int(args.epochs)):
-
-        train_loss = log_reg_run_epoch(train_loader, log_reg, "train", epoch)
-        validate_loss = log_reg_run_epoch(valid_loader, log_reg, "validate", epoch)
-
-        is_best = validate_loss < best_loss
-        best_loss = min(validate_loss, best_loss)
-        track_loss[epoch, 0] = train_loss
-        track_loss[epoch, 1] = validate_loss
-        
-        save_checkpoint({
-            'epoch': epoch,
-            'model': log_reg.state_dict(),
-            'optimizer': optimizer.state_dict(),
-            'track_loss': track_loss,
-            'cmd_line_args': args,
-            'seed': args.seed
-        }, is_best, folder = args.out_dir)
-        # np.save(os.path.join(args.out_dir, 'loss.npy'), track_loss)
-
-    # test
-    test_dataset = CausalMNIST(split='test',cf=cf)
-    test_loader = DataLoader(test_dataset, shuffle=True, batch_size=args.batch_size)
-
-    test_model = LogisticRegression(cf)
-    _,_,state_dict = load_checkpoint(folder=args.out_dir)
-    test_model.load_state_dict(state_dict)
-    run_epoch(test_loader, test_model, "test")
-    """
+    log_reg_run_epoch(test_loader, test_model, "test")
