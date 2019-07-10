@@ -1,9 +1,48 @@
 import os
 import torch
 import shutil
+from generate import MIN_COLOR, MAX_COLOR
 
 EPSILON = 1e-3      # window around z to resample
 PRIOR_WEIGHT = .5   # weights for prior (as opposed to posterior) distribution
+
+# UTILS: PREPROCESSING
+# from_unit_interval means 
+
+def clamp_img(img, standardized = False):
+    if (type(img) is not np.ndarray):
+        img = img.numpy()
+        
+    if (not standardized):
+        maximum = MAX_COLOR
+        minimum = MIN_COLOR
+    else:
+        maximum, minimum = 1, -1
+
+    return np.maximum(np.minimum(top_left, maximum), minimum)
+
+def standardize_img(img, from_unit_interval = False):
+    if (type(img) is not np.ndarray):
+        img = img.numpy()
+
+    if (from_unit_interval):
+        img *= 2
+        img -= 1
+    else:
+        img -= np.mean(img, axis=0)
+        img /= np.std(img, axis=0)
+    return img
+
+def viewable_img(img, from_unit_interval = False):
+    if (type(img) is not np.ndarray):
+        img = img.numpy()
+
+    if (not from_unit_interval):
+
+    img *= MAX_COLOR
+
+
+    return img
 
 # UTILS: TRAINING
 
@@ -23,6 +62,22 @@ class AverageMeter(object):
         self.sum += val * n
         self.count += n
         self.avg = self.sum / self.count
+
+# have losstracker us averagemeter
+class LossTracker():
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.loss_kinds = {}
+        self.best_loss = float('inf')
+
+    def update(self, loss_kind, epoch=0, val, n=1):
+        if (loss_kind not in loss_kinds):
+            meter = AverageMeter()
+            loss_kinds[loss_kind] = [meter]
+
+        self.loss_kinds[loss_kind][epoch].update(val, n)
 
 def save_checkpoint(state, is_best, folder='./', filename='checkpoint.pth.tar'):
     if not os.path.isdir(folder):
@@ -84,4 +139,3 @@ def latent_cfs(z, post_mean, post_var, sample_from = "prior"):
         cf[:,dim] = resample(z, post_mean, post_var, sample_from)
         cfs.append(latent_cf(perturbation, z))
     return cfs
-

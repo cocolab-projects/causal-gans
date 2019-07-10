@@ -8,7 +8,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-from utils import (AverageMeter, save_checkpoint)
+from utils import clamp_img
 
 import torch
 import torch.utils.data
@@ -88,7 +88,7 @@ def img_of_world(world, four_img, three_img):
     # apply nonlinear transformations
     for event in world:
         if (event): top_left = event_functions[event](top_left)
-    top_left = np.maximum(np.minimum(top_left, MAX_COLOR), MIN_COLOR)
+    top_left = clamp_img(top_left)
 
     # put all four corner images together
     return np.concatenate((np.concatenate((top_left, BLK_SQR), axis=1),
