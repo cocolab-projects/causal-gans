@@ -61,7 +61,7 @@ def log_reg_loop(loader, model, mode, pbar=None):
             optimizer.step()
 
             pbar.set_postfix({'loss': loss_meter.avg})
-            pbar.update()
+            # pbar.update()
 
     return loss_meter.avg, causal_loss_meter.avg
 
@@ -172,14 +172,16 @@ def handle_args():
                         help="number of training steps for discriminator per iter")
     return parser.parse_args()
 
-print_progress(epoch, epochs, batch, num_batches, loss_d, attached_classifier, loss_g)
-    print(
-        "[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G{} loss: %f]"
-        % (epoch, epochs, batch, num_batches, len(train_loader),
-            loss_d, attached_classifier, loss_g)
-    )
+def print_progress(epoch, epochs, batch, num_batches, loss_d, attach_classifier, loss_g):
+    temp = ""
+    if (attach_classifier):
+        temp = "/C"
+    print("[Epoch %d/%d] [Batch %d/%d] [D loss: %f] [G%s loss: %f]"
+        % (epoch, epochs, batch, num_batches, loss_d, temp, loss_g)
+        )
 
-# todo: consider preprocessing (center pixels around 0, ensure |value| \leq 1)
+# TODO: consider preprocessing (center pixels around 0, ensure |value| \leq 1)
+# TODO: make updates regular/more informative
 if __name__ == "__main__":
     # args
     args = handle_args()
@@ -192,7 +194,7 @@ if __name__ == "__main__":
     cf = False
     transform = False
     wass = True
-    attach_classifier = False
+    attach_classifier = True
 
     train_dataset = CausalMNIST(split="train", cf=cf, transform=transform)
     train_loader = DataLoader(train_dataset, shuffle=True, batch_size=args.batch_size)
@@ -205,7 +207,7 @@ if __name__ == "__main__":
 
     if (attach_classifier):
         log_reg = LogisticRegression(cf).to(device)
-        optimizer_log = torch.optim.Adam(log_reg.parameters(), lr=args.lr, betas=(args.b1, args.b2))
+        optimizer_log_reg = torch.optim.Adam(log_reg.parameters(), lr=args.lr, betas=(args.b1, args.b2))
 
         valid_dataset = CausalMNIST(split="validate", cf=cf)
         valid_loader = DataLoader(valid_dataset, shuffle=True, batch_size=args.batch_size)
@@ -221,10 +223,13 @@ if __name__ == "__main__":
     for epoch in range(int(args.epochs)):
         if (attach_classifier):
             log_reg.train()
-            pbar = tqdm(total=len(train_loader))
+            loss_meter = AverageMeter()
+            causal_loss_meter = AverageMeter()
+            criterion_log_reg = torch.nn.BCELoss()
 
         for i, (imgs, labels) in enumerate(train_loader):
             imgs,labels = imgs.to(device), labels.to(device)
+
 
             # adversarial ground truths
             with torch.no_grad():
@@ -249,21 +254,26 @@ if __name__ == "__main__":
             if not wass or i % args.n_critic == 0:
                 gen_imgs = generator(z)
 
-                loss = get_loss_g(wass, discriminator, gen_imgs, valid)
-                if (attach_classifier):
-                    loss +=
-                    optimizer_log.zero_grad()
-
+                loss_g = get_loss_g(wass, discriminator, gen_imgs, valid)
                 optimizer_g.zero_grad()
-                loss.backward()
+
+                if (attach_classifier):
+                    outputs = log_reg(imgs)
+                    loss_log_reg = criterion_log_reg(outputs, labels.float().unsqueeze(1))
+                    loss_log_reg_amt = loss_log_reg.item()
+                    loss_meter.update(loss_log_reg_amt, train_loader.batch_size)
+
+                    loss_g += loss_log_reg
+                    optimizer_log_reg.zero_grad()
+
+                loss_g.backward()
                 optimizer_g.step()
 
-                if(attach_classifier):
-                    optimizer_log.step()
-
+                if (attach_classifier):
+                    optimizer_log_reg.step()
 
                 print_progress(epoch, args.epochs, i, len(train_loader), loss_d.item(),
-                                "/C" if attach_classifier else "", loss.item())
+                                attach_classifier, loss_g.item())
 
             batches_done = epoch * len(train_loader) + i
             if batches_done % args.sample_interval == 0:
@@ -272,12 +282,10 @@ if __name__ == "__main__":
         # todo: add training for log reg
         # todo: decompose, check variable names here:
         if (attach_classifier):
-            pbar.close()
             validate_loss = log_reg_run_epoch(valid_loader, log_reg, "validate", epoch)
             
-            is_best = validate_loss < best_loss
             best_loss = min(validate_loss, best_loss)
-            track_loss[epoch, 0] = train_loss
+            track_loss[epoch, 0] = loss_log_reg
             track_loss[epoch, 1] = validate_loss
             
             save_checkpoint({
@@ -287,7 +295,7 @@ if __name__ == "__main__":
                 'track_loss': track_loss,
                 'cmd_line_args': args,
                 'seed': args.seed
-            }, is_best, folder = args.out_dir)
+            }, best_loss == validate_loss, folder = args.out_dir)
 
     # test
     test_dataset = CausalMNIST(split='test',cf=cf)
