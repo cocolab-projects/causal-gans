@@ -9,7 +9,7 @@ from torchvision import transforms
 
 from generate import mnist_dir_setup, generate_worlds
 
-TRAIN_SET_SZ = 5000
+TRAIN_SET_SZ = 5500  # note: maybe larger for GAN
 VAL_SET_SZ = 1000
 TEST_SET_SZ = 1000
 
@@ -27,12 +27,12 @@ class CausalMNIST(Dataset):
 
 		if (split == "train"):
 			self.length = TRAIN_SET_SZ
-		elif (split == "test"):
-			self.length = TEST_SET_SZ
 		elif (split == "validate"):
 			self.length = VAL_SET_SZ
+		elif (split == "test"):
+			self.length = TEST_SET_SZ
 		else:
-			raise RuntimeError("CausalMNIST was expecting split to be 'train', 'test', or 'validate'.")
+			raise RuntimeError("CausalMNIST was expecting split to be 'train', 'validate', or 'test'.")
 		
 		scenarios = generate_worlds(self.mnist, n=self.length, cf=cf, transform=transform)
 		self.imgs = [self.img_transform(Image.fromarray(scenarios[i][0])) for i in range(self.length)]

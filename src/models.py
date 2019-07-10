@@ -33,7 +33,6 @@ class Generator(nn.Module):
             layers.append(nn.LeakyReLU(0.2, inplace=True))
             return layers
 
-        # ask Mike (tried Google already): what does * do?
         self.model = nn.Sequential(
             *block(latent_dim, 128, normalize=False),
             *block(128, 256),
@@ -54,7 +53,9 @@ class Discriminator(nn.Module):
 
         self.optimizer = torch.optim.RMSprop if wass else torch.optim.Adam
 
+        # if we're including counterfactual imgs in training, they're concatenated, so we need to increase height
         if (cf): img_height *= TOTAL_NUM_WORLDS
+
         self.img_shape = (n_channels, img_height, img_width)
         
         self.model = nn.Sequential(
