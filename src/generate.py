@@ -8,7 +8,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-from utils import clamp_img
+from utils import (clamp_img, standardize_img, viewable_img)
 
 import torch
 import torch.utils.data
@@ -16,23 +16,16 @@ import torchvision.datasets as dset
 import torchvision.transforms as transform
 from torchvision.utils import save_image
 
-import pdb
-
 DATA_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), "../data")
 
-# interpretations
-# "causal": probability that weather forecast predicts rain (it never predicts no rain when there's rain)
-# "C": probability of rain, given forecast
-# "noC": probability of sprinklers
-# note: O and C are indistinguishable; both are evidenced by wet grass
-# "CE": probability of roof being wet, due to rain
-# "bE": probability of mike throwing water balloon at roof
+NUM1 = 4
+NUM2 = 3
 
 p = {"causal": .5, "C": .8, "noC": .8, "cE": .6, "bE": .5}
-event_functions = { "causal": lambda x: x**2,
-                    "C": lambda x: (x+1)**2,
+event_functions = { "causal": lambda x: np.power(x, 1.1), # x**2,
+                    "C": lambda x: np.power(x,1.2), # (x+1)**2,
                     "noC": lambda x: x,
-                    "cE": lambda x: (x+2)**2,
+                    "cE": lambda x: np.power(x,1.15), # (x+2)**2,
                     "bE": lambda x: x
                     }
 TOTAL_NUM_WORLDS = len(p) + 1
@@ -40,9 +33,6 @@ TOTAL_NUM_WORLDS = len(p) + 1
 CORNER_DIM = 32
 IMG_DIM = CORNER_DIM*2
 BLK_SQR = np.zeros((CORNER_DIM,CORNER_DIM))
-
-MIN_COLOR = 0.0
-MAX_COLOR = 255.0
 
 # why do we vary "causal"?
 # causal entity or process
@@ -71,11 +61,10 @@ def generate_worlds(mnist, n=1, cf = False, transform=True):
 
 def num_from_mnist(digit, mnist):
     loc = np.random.choice(np.where(mnist["labels"] == digit)[0])
-    # loc = (np.where(mnist["labels"] == digit)[0])[0]
     return mnist["digits"][loc]
 
 def imgs_of_worlds(worlds, mnist):
-    four_img, three_img = num_from_mnist(4, mnist), num_from_mnist(3, mnist)
+    four_img, three_img = num_from_mnist(NUM1, mnist), num_from_mnist(NUM2, mnist)
     return [img_of_world(world, four_img, three_img) for world in worlds]
 
 def img_of_world(world, four_img, three_img):
@@ -84,11 +73,19 @@ def img_of_world(world, four_img, three_img):
     # set numbers in corners if they're in the world
     top_left = four_img if nums[0] else BLK_SQR
     bottom_right = three_img if nums[1] else BLK_SQR
+
+    # TEMP
+    temp = top_left
+    save_image(torch.from_numpy(viewable_img(top_left)), "original.png")
+    for event in world:
+        temp = event_functions[event](top_left)
+    save_image(torch.from_numpy(viewable_img(temp)), "modified.png")
+    # end TEMP
     
     # apply nonlinear transformations
     for event in world:
         if (event): top_left = event_functions[event](top_left)
-    top_left = clamp_img(top_left)
+    top_left = clamp_img(top_left, standardized=True)
 
     # put all four corner images together
     return np.concatenate((np.concatenate((top_left, BLK_SQR), axis=1),
@@ -97,17 +94,17 @@ def img_of_world(world, four_img, three_img):
 
 def reformat(world):
     if(world["causal"]):
-        four = 4 if world["C"] else ""
-        three = 3 if ((world["C"] and world["cE"]) or world["bE"]) else ""
+        num1 = NUM1 if world["C"] else ""
+        num2 = NUM2 if ((world["C"] and world["cE"]) or world["bE"]) else ""
 
-        nums = [four, three]
-        utt = (("causal " + str(four)) if str(four) else "") + str(three)
+        nums = [num1, num2]
+        utt = (("causal " + str(num1)) if str(num1) else "") + str(num2)
     else:
-        four = 4 if world["noC"] else ""
-        three = 3 if world["bE"] else ""
+        num1 = NUM1 if world["noC"] else ""
+        num2 = NUM2 if world["bE"] else ""
 
-        nums = [four, three]
-        utt = str(four) + str(three)
+        nums = [num1, num2]
+        utt = str(num1) + str(num2)
     return nums, utt
 
 def flip_rv(actual, key, key_to_vary):
@@ -152,12 +149,13 @@ def load_mnist(root):
         shuffle=False
     )
 
+    # TODO: only get relevant digit values.
     train_data = {
-        'digits': np.concatenate([img.numpy()*MAX_COLOR for img,label in train_loader], axis = 0)[:,0,...],
+        'digits': np.concatenate([standardize_img(img, from_unit_interval=True) for img,label in train_loader], axis = 0)[:,0,...],
         'labels': np.concatenate([label.numpy() for img,label in train_loader], axis = 0),
     }
     test_data = {
-        'digits': np.concatenate([img.numpy()*MAX_COLOR for img, label in test_loader],axis = 0)[:,0,...],
+        'digits': np.concatenate([standardize_img(img, from_unit_interval=True) for img, label in test_loader],axis = 0)[:,0,...],
         'labels': np.concatenate([label.numpy() for img,label in train_loader], axis = 0),
     }
 
@@ -170,6 +168,16 @@ def mnist_dir_setup(train):
 
     train_mnist, test_mnist = load_mnist(DATA_DIR)
     return train_mnist if train else test_mnist
+
+import copy
+
+A = 20, B = 30
+def warp(img):
+    new_img = copy.deepcopy(img)
+    for (u,v), value in np.ndenumerate(img):
+        x = u + A *np.sin(2.0 * np.pi  * v / B)
+        new_img[x][y] = img[u][v]
+    return new_img
 
 if __name__ ==  "__main__":
     import argparse
@@ -187,4 +195,10 @@ if __name__ ==  "__main__":
 
     mnist= mnist_dir_setup(args.train)
 
-    generate_worlds(mnist, n=args.dataset_size, cf=True)
+    img = mnist["digits"][0]
+
+    save_image(torch.from_numpy(viewable_img(img)), "original.png")
+    #for key in event_functions: img = event_functions[key](img)
+    save_image(torch.from_numpy(viewable_img(img)), "modified.png")
+    breakpoint()
+    # generate_worlds(mnist, n=args.dataset_size, cf=True)

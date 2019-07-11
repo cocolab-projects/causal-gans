@@ -1,48 +1,49 @@
 import os
 import torch
 import shutil
-from generate import MIN_COLOR, MAX_COLOR
+import copy
+import numpy as np
+
+MIN_COLOR = 0.0
+MAX_COLOR = 255.0
 
 EPSILON = 1e-3      # window around z to resample
 PRIOR_WEIGHT = .5   # weights for prior (as opposed to posterior) distribution
 
 # UTILS: PREPROCESSING
-# from_unit_interval means 
 
-def clamp_img(img, standardized = False):
+def clamp_img(img, standardized = True):
     if (type(img) is not np.ndarray):
         img = img.numpy()
-        
-    if (not standardized):
-        maximum = MAX_COLOR
-        minimum = MIN_COLOR
-    else:
+
+    if (standardized):
         maximum, minimum = 1, -1
-
-    return np.maximum(np.minimum(top_left, maximum), minimum)
-
-def standardize_img(img, from_unit_interval = False):
-    if (type(img) is not np.ndarray):
-        img = img.numpy()
-
-    if (from_unit_interval):
-        img *= 2
-        img -= 1
     else:
-        img -= np.mean(img, axis=0)
-        img /= np.std(img, axis=0)
-    return img
+        maximum, minimum = MAX_COLOR, MIN_COLOR
 
-def viewable_img(img, from_unit_interval = False):
+    return np.maximum(np.minimum(img, maximum), minimum)
+
+def standardize_img(img, from_unit_interval = True):
+    img = copy.deepcopy(img)
     if (type(img) is not np.ndarray):
         img = img.numpy()
 
     if (not from_unit_interval):
+        img /= MAX_COLOR
 
-    img *= MAX_COLOR
+    img = (img * 2.0) - 1.0
 
+    return clamp_img(img, True)
 
-    return img
+def viewable_img(img, from_unit_interval = False):
+    img = copy.deepcopy(img)
+    if (type(img) is not np.ndarray):
+        img = img.numpy()
+
+    if (not from_unit_interval):
+        img = (img + 1.0) / 2.0
+
+    return clamp_img(img * MAX_COLOR, False)
 
 # UTILS: TRAINING
 
@@ -72,10 +73,10 @@ class LossTracker():
         self.loss_kinds = {}
         self.best_loss = float('inf')
 
-    def update(self, loss_kind, epoch=0, val, n=1):
-        if (loss_kind not in loss_kinds):
+    def update(self, loss_kind="loss", epoch=0, val=0, n=1):
+        if (loss_kind not in self.loss_kinds):
             meter = AverageMeter()
-            loss_kinds[loss_kind] = [meter]
+            self.loss_kinds[loss_kind] = [meter]
 
         self.loss_kinds[loss_kind][epoch].update(val, n)
 
@@ -119,7 +120,7 @@ def resample(z, post_mean, post_var, sample_from):
     elif (sample_from == "post"):
         return normal_resample(post_mean, post_var)
     elif (sample_from == "mix"):
-        if (np.random.binomial(1,PRIOR_WEIGHT))
+        if (np.random.binomial(1,PRIOR_WEIGHT)):
             return normal_resample()
         else:
             return normal_resample(post_mean, post_var)

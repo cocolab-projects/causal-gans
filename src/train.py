@@ -18,7 +18,7 @@ from torchvision.utils import save_image
 
 from datasets import CausalMNIST
 from models import (LogisticRegression, Generator, Discriminator)
-from utils import (LossTracker, AverageMeter, save_checkpoint, free_params, frozen_params, to_percent)
+from utils import (LossTracker, AverageMeter, save_checkpoint, free_params, frozen_params, to_percent, viewable_img)
 
 CLASSIFIER_LOSS_WT = 1.0
 
@@ -88,7 +88,6 @@ def load_checkpoint(folder='./', filename='model_best.pth.tar'):
     return epoch, loss_tracker, classifier, GAN
 
 def get_loss_d(wass, discriminator, imgs, gen_imgs, valid, fake):
-    # imgs = imgs.type(Tensor)
     if (wass):
         return -torch.mean(discriminator(imgs)) + torch.mean(discriminator(gen_imgs))
     else:
@@ -197,13 +196,10 @@ if __name__ == "__main__":
 
             # adversarial ground truths
             with torch.no_grad():
-                valid = torch.ones(img.size(0), 1, device=device)
-                fake = torch.zeros(img.size(0), 1, device=device)
-                # valid = torch.Tensor(imgs.size(0), 1).fill_(1.0).to(device)
-                # fake = torch.Tensor(imgs.size(0), 1).fill_(0.0).to(device)
+                valid = torch.ones(imgs.size(0), 1, device=device)
+                fake = torch.zeros(imgs.size(0), 1, device=device)
 
             # generate images      
-            # z = torch.Tensor(np.random.normal(0, 1, (args.batch_size, args.latent_dim))).to(device)
             z = torch.randn(batch_size, args.latent_dim, device=device)
 
             with torch.no_grad():
@@ -249,7 +245,7 @@ if __name__ == "__main__":
 
             batches_done = epoch * len(train_loader) + i
             if batches_done % args.sample_interval == 0:
-                save_image(gen_imgs.data[:25], "%d.png" % batches_done, nrow=5)
+                save_image(viewable_img(gen_imgs.data[:25]), "%d.png" % batches_done, nrow=5)
         
         if (attach_classifier):
             validate_loss = log_reg_run_epoch(valid_loader, log_reg, "validate", epoch)
