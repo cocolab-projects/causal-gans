@@ -171,7 +171,8 @@ def mnist_dir_setup(train):
 
 import copy
 
-A = 20, B = 30
+A = 20
+B = 30
 def warp(img):
     new_img = copy.deepcopy(img)
     for (u,v), value in np.ndenumerate(img):
@@ -185,15 +186,16 @@ if __name__ ==  "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=42,
                         help='random seed [default: 42]')
-    parser.add_argument('--train', action='store_true', default=True,
-                        help='sample digits from train set of MNIST [default: True]')
+    parser.add_argument('--test', action='store_true',
+                        help='sample digits from test set of MNIST')
     parser.add_argument('--dataset_size', type=int, default=10,
                         help='number of images in dataset [default: 10]')
     args = parser.parse_args()
 
     np.random.seed(args.seed)
 
-    mnist= mnist_dir_setup(args.train)
+    train = not args.test
+    mnist= mnist_dir_setup(train)
 
     img = mnist["digits"][0]
 
