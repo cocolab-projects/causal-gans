@@ -18,7 +18,9 @@ We aim to show whether this classifier, augmented with the latent space and coun
 
 Ideally, we would like to further show whether the model can learn to structure its generator such that the counterfactual transformation exposes the appropriate causal relations.
 
-@import "background.md"
+@import "data.md"
+@import "experiments.md"
 @import "related_work.md"
+@import "background.md"
 
 ## References
