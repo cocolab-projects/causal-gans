@@ -269,16 +269,13 @@ pre[data-line] .line-highlight[data-end]:after {
       <div class="mume markdown-preview  ">
       <h1 id="causality-in-modern-deep-generative-models">Causality in Modern Deep Generative Models</h1>
 <ul>
-<li><a href="#causality-in-modern-deep-generative-models">Causality in Modern Deep Generative Models</a>
+<li><a href="#data">Data</a></li>
+<li><a href="#experiments">Experiments</a>
 <ul>
-<li><a href="#background">Background</a>
-<ul>
-<li><a href="#psychology">Psychology</a>
-<ul>
-<li><a href="#prior-expectations-affect-counterfactual-and-causal-judgements">Prior expectations affect counterfactual and causal judgements</a></li>
-<li><a href="#people-use-counterfactual-simulation-to-understand-cause">People use counterfactual simulation to understand &quot;cause&quot;</a></li>
-</ul>
-</li>
+<li><a href="#negative-control">Negative Control</a></li>
+<li><a href="#positive-control">Positive Control</a></li>
+<li><a href="#regular-gan">Regular GAN</a></li>
+<li><a href="#causal-gan">Causal GAN</a></li>
 </ul>
 </li>
 <li><a href="#related-work">Related work</a>
@@ -286,23 +283,106 @@ pre[data-line] .line-highlight[data-end]:after {
 <li><a href="#causalgan">CausalGAN</a></li>
 </ul>
 </li>
-<li><a href="#references">References</a></li>
+<li><a href="#background">Background</a>
+<ul>
+<li><a href="#psychology">Psychology</a>
+<ul>
+<li><a href="#people-use-counterfactuals-to-understand-cause">People use counterfactuals to understand &quot;cause&quot;</a></li>
+<li><a href="#expectations-affect-counterfactual-and-causal-judgements">Expectations affect counterfactual and causal judgements</a></li>
 </ul>
 </li>
 </ul>
-<h2 id="background">Background</h2>
-<h3 id="psychology">Psychology</h3>
-<h4 id="prior-expectations-affect-counterfactual-and-causal-judgements">Prior expectations affect counterfactual and causal judgements</h4>
-<p>People often imagine counterfactual changes that would undo a negative outcome, thinking things like &#x201C;If only he had driven home a little later, he wouldn&#x2019;t have gotten in a car crash.&#x201D; <span class="citation" data-cites="kahneman_simulation_1981">Kahneman and Tversky (1981)</span> show that people are sensitive to prior expectations when deciding on an &#x201C;if only&#x2026;&#x201D; counterfactual. They presented stories where they varied whether a character Mr.&#xA0;Jones went home at the usual time via an unusual route or went home at an unusually early time via his usual route. Participants were much more likely to mention counterfactuals where Mr.&#xA0;Jones behaved more like he usually did, choosing the route to counterfactually change when the route had been unusual, and choosing the time to counterfactually change when the time had been unusual.</p>
-<h4 id="people-use-counterfactual-simulation-to-understand-cause">People use counterfactual simulation to understand &#x201C;cause&#x201D;</h4>
-<p><span class="citation" data-cites="gerstenberg_eye-tracking_2017">Gerstenberg et al. (2017)</span> used eyetracking to more directly show that people spontaneously consider counterfactual outcomes while making causal judgements. They tracked eye movements while participants judged whether one billiard ball caused another to go through a gate. When asked for <em>causal</em> judgements like this, but not when asked about details of the <em>outcome</em> (how close the caused ball came to the edge of the gate), participants&#x2019; eye movements traced the counterfactual path that the caused ball would have taken had the causing ball been absent.</p>
+</li>
+<li><a href="#references">References</a></li>
+</ul>
+<p>Humans reason and communicate about causality when learning about and interacting with the world. Most statistical models (including deep learning) are limited to measuring correlation, unable to make claims about causality between variables. In this project, we aim to augment a deep generative model such that it can represent causal relations in a human-interpretable way and guide its learning to be consistent with labeled causal relations.</p>
+<p>We train our model on a dataset of MNIST images where the presence of one digit depends causally on the presence of another digit. We jointly train ALI and a linear classifier, which labels whether each image is an instance of a causal relation. This classifier takes as input the actual image as well as a &#x201C;counterfactual&#x201D; image. This counterfactual image is the result of inferring a value for the actual image in the latent space, applying a fixed set of transformations, and observing the corresponding &#x201C;close&#x201D; alternative images.</p>
+<p>We aim to show whether this classifier, augmented with the latent space and counterfactual transform, can accurately distinguish between perceptually similar but causally different images.</p>
+<p>Ideally, we would like to further show whether the model can learn to structure its generator such that the counterfactual transformation exposes the appropriate causal relations.</p>
+<h2 id="data">Data</h2>
+<p>Bayes Net where presence of one digit depends causally on another</p>
+<p>MNIST digits with nonlinear transforms</p>
+<p>Labels for whether an image is &#x201C;causal&#x201D; (1) or &#x201C;noncausal&#x201D; (0)</p>
+<h2 id="experiments">Experiments</h2>
+<h3 id="negative-control">Negative Control</h3>
+<p>Augmenting the GAN would be useless for improving the &#x201C;perception&#x201D; of the classifier if the classifier already has an easy time distinguishing the causal digit from the noncausal one. So we first show that we chose an appropriately difficult nonlinear transform for our dataset.</p>
+<p>Classifier performance: {{CLASSIFIER PERFORMANCE ON ACTUAL TARGET IMAGES (low)}}</p>
+<h3 id="positive-control">Positive Control</h3>
+<p>The GAN isn&#x2019;t going to learn to represent the correct counterfactual images unless having the correct counterfactual images would be useful. So we generate an &#x201C;oracle&#x201D; set of augmented images with the correct counterfactuals, given our causal model of the data. We show that the linear classifier can use the correct counterfactuals to overcome its difficulty distinguishing the &#x201C;causal&#x201D; from &#x201C;noncausal&#x201D; target images.</p>
+<p>Classifier performance: {{CLASSIFIER PERFORMANCE ON AUGMENTED TARGET IMAGES (high)}}</p>
+<h3 id="regular-gan">Regular GAN</h3>
+<p>We train a GAN and linear classifier together on the actual images and their labels.</p>
+<p>We show that classifier performance is still low.</p>
+<p>Classifier performance: {{CLASSIFIER PERFORMANCE ON ACTUAL TARGET IMAGES WHEN TRAINED WITH JOINT GAN+CLASSIFIER OBJECTIVE (low)}}</p>
+<p>QUESTION: do the images look good?</p>
+<p>QUESTION: inspect probabilities and CFs:</p>
+<ul>
+<li>What is P(3)? What is P(4)? What is P(3 and 4)? How do these compare to the correct probabilities?
+<ul>
+<li>CORRECT: P(3) = ; MODEL: P(3) = ;</li>
+<li>CORRECT: P(4) = ; MODEL: P(4) = ;</li>
+<li>CORRECT: P(3 AND 4) = ; MODEL: P(3 AND 4) = ;</li>
+</ul></li>
+<li>Inspect CFs (after adding CF transform):
+<ul>
+<li>(how) are the CFs different for &#x201C;causal&#x201D; and &#x201C;noncausal&#x201D; target images?</li>
+<li>Given actual &#x201C;causal&#x201D; and &#x201C;noncausal&#x201D; target images, what is P_CF(3 | !4)? How does this compare to the correct CF probabilities?
+<ul>
+<li>CORRECT: P_CF(3 | !4) = ; MODEL: P(3 | !4) = ;</li>
+</ul></li>
+</ul></li>
+</ul>
+<h3 id="causal-gan">Causal GAN</h3>
+<p>We train ALI and a linear classifier together on the actual images and their labels. We augment the linear classifier&#x2019;s input to include the CF transformed images.</p>
+<p>We show that classifier performance improves (hopefully).</p>
+<p>Classifier performance: {{CLASSIFIER PERFORMANCE ON ACTUAL TARGET IMAGES WHEN TRAINED WITH JOINT ALI+CFTRANSFORM+CLASSIFIER OBJECTIVE (high)}}</p>
+<p>QUESTION: do the actual images look good?</p>
+<p>QUESTION: inspect probabilities and CFs:</p>
+<ul>
+<li>What is P(3)? What is P(4)? What is P(3 and 4)? How do these compare to the correct probabilities?
+<ul>
+<li>CORRECT: P(3) = ; MODEL: P(3) = ;</li>
+<li>CORRECT: P(4) = ; MODEL: P(4) = ;</li>
+<li>CORRECT: P(3 AND 4) = ; MODEL: P(3 AND 4) = ;</li>
+</ul></li>
+<li>Inspect CFs (after adding CF transform):
+<ul>
+<li>(how) are the CFs different for &#x201C;causal&#x201D; and &#x201C;noncausal&#x201D; target images?</li>
+<li>Given actual &#x201C;causal&#x201D; and &#x201C;noncausal&#x201D; target images, what is P_CF(3 | !4)? How does this compare to the correct CF probabilities?
+<ul>
+<li>CORRECT: P_CF(3 | !4) = ; MODEL: P(3 | !4) = ;</li>
+</ul></li>
+</ul></li>
+</ul>
 <h2 id="related-work">Related work</h2>
 <h3 id="causalgan">CausalGAN</h3>
 <p><span class="citation" data-cites="kocaoglu2018causalgan">Kocaoglu et al. (2018)</span> present a method to separate the work of generating images from the work of learning a causal model. They assume that the true causal graph is given, and train one GAN to sample plausible configurations of features from that causal model and another GAN to generate images given different configurations of features. This separation allows them to sample implausible but imaginable images (e.g.&#xA0;women with mustaches) by <em>intervention</em> on a labeled variable (e.g.&#xA0;<em>mustache</em>) in the causal model, while still being able to sample only plausible images (e.g.&#xA0;men with mustaches) by <em>conditioning</em> on the same variable.</p>
+<h2 id="background">Background</h2>
+<h3 id="psychology">Psychology</h3>
+<h4 id="people-use-counterfactuals-to-understand-cause">People use counterfactuals to understand &#x201C;cause&#x201D;</h4>
+<p><span class="citation" data-cites="gerstenberg_eye-tracking_2017">Gerstenberg et al. (2017)</span> used eyetracking to more directly show that people spontaneously consider counterfactual outcomes while making causal judgements. They tracked eye movements while participants judged whether one billiard ball caused another to go through a gate. When asked for <em>causal</em> judgements like this, but not when asked about details of the <em>outcome</em> (how close the caused ball came to the edge of the gate), participants&#x2019; eye movements traced the counterfactual path that the caused ball would have taken had the causing ball been absent.</p>
+<h4 id="expectations-affect-counterfactual-and-causal-judgements">Expectations affect counterfactual and causal judgements</h4>
+<p>When researchers discuss the role of expectations in counterfactual and causal reasoning, they typically refer to two main categories of expectations: <em>statistical normality</em> and <em>prescriptive normality</em>. Statistical normality refers to the probabilities of what is likely to occur, whereas prescriptive normality refers to what &#x201C;should&#x201D; occur. Both seem to influence causal reasoning, and both concepts of normality seem to have similar effects.</p>
+<p>People often imagine counterfactual changes that would undo a negative outcome, thinking things like &#x201C;If only he had driven home a little later, he wouldn&#x2019;t have gotten in a car crash.&#x201D; <span class="citation" data-cites="kahneman_simulation_1981">Kahneman and Tversky (1981)</span> show that people are sensitive to statistical normality when deciding on an &#x201C;if only&#x2026;&#x201D; counterfactual. They presented stories where they varied whether a character Mr.&#xA0;Jones went home at the usual time via an unusual route or went home at an unusually early time via his usual route. Participants were much more likely to mention counterfactuals where Mr.&#xA0;Jones behaved more like he usually did, choosing the route to counterfactually change when the route had been unusual, and choosing the time to counterfactually change when the time had been unusual.</p>
+<p>Faced with this case, participants tend to say that the professor caused the problem (Knobe and Fraser, 2008, Phillips et al., 2015).</p>
+<p><span class="citation" data-cites="icard_normality_2017">Icard, Kominsky, and Knobe (2017)</span> summarize the ways that statistical and prescriptive normality affect causal judgements into three main categories:</p>
+<ul>
+<li><strong>Abnormal inflation</strong>: When there are multiple necessary causal factors for an outcome, people will be more likely to call something a cause if it is abnormal.</li>
+<li><strong>Supersession</strong>: When there are multiple necessary causal factors for an outcome, people will be more likely to call something a cause if the <em>other</em> factors are normal.</li>
+<li><strong>No supersession with disjunction</strong>: When there are multiple <em>sufficient</em> causal factors for an outcome (i.e.&#xA0;any one of the factors could have produced the outcome independently), people&#x2019;s judgements of how likely something is to be a cause does <em>not</em> depend on the normality of the other factors.</li>
+</ul>
+<p>They show how a model of causal reasoning based on <em>probabilistic sampling</em> of counterfactual situations would result in these observed phenomena. They further present an additional principle, predicted by their model:</p>
+<ul>
+<li><strong>Abnormal deflation</strong>: When there are multiple <em>sufficient</em> (but not necessary) causal factors for an outcome, people will be more likely to call something a cause if it is normal.</li>
+</ul>
+<p>They present an experiment with animations simulating billiard balls colliding, representing either conjunctive (multiple necessary factors) or disjunctive (multiple sufficient factors) causal scenarios. As predicted, they demonstrate abnormal inflation in the conjunctive scenario and abnormal deflation in the disjunctive scenario.</p>
 <h2 id="references" class="unnumbered">References</h2>
 <div id="refs" class="references" role="doc-bibliography">
 <div id="ref-gerstenberg_eye-tracking_2017">
 <p>Gerstenberg, Tobias, Matthew F. Peterson, Noah D. Goodman, David A. Lagnado, and Joshua B. Tenenbaum. 2017. &#x201C;Eye-Tracking Causality.&#x201D; <em>Psychological Science</em> 28 (12): 1731&#x2013;44. <a href="https://doi.org/10.1177/0956797617713053">https://doi.org/10.1177/0956797617713053</a>.</p>
+</div>
+<div id="ref-icard_normality_2017">
+<p>Icard, Thomas F., Jonathan F. Kominsky, and Joshua Knobe. 2017. &#x201C;Normality and Actual Causal Strength.&#x201D; <em>Cognition</em> 161 (April): 80&#x2013;93. <a href="https://doi.org/10.1016/j.cognition.2017.01.010">https://doi.org/10.1016/j.cognition.2017.01.010</a>.</p>
 </div>
 <div id="ref-kahneman_simulation_1981">
 <p>Kahneman, Daniel, and Amos Tversky. 1981. &#x201C;The Simulation Heuristic.&#x201D; TR-5. STANFORD UNIV CA DEPT OF PSYCHOLOGY. <a href="https://apps.dtic.mil/docs/citations/ADA099504">https://apps.dtic.mil/docs/citations/ADA099504</a>.</p>
