@@ -5,10 +5,11 @@ generate.py
 @version June 2019
 """
 import os
+import copy
 import numpy as np
 import matplotlib.pyplot as plt
 
-from utils import (clamp_img, standardize_img, viewable_img)
+from utils import (clamp_img, standardize_img, viewable_img, MIN_COLOR, MAX_COLOR, MNIST_MIN_COLOR, MNIST_MAX_COLOR)
 
 import torch
 import torch.utils.data
@@ -22,11 +23,11 @@ NUM1 = 4
 NUM2 = 3
 
 p = {"causal": .5, "C": .8, "noC": .8, "cE": .6, "bE": .5}
-event_functions = { "causal": lambda x: np.power(x, 1.1), # x**2,
-                    "C": lambda x: np.power(x,1.2), # (x+1)**2,
-                    "noC": lambda x: x,
-                    "cE": lambda x: np.power(x,1.15), # (x+2)**2,
-                    "bE": lambda x: x
+event_functions = { "causal": lambda img: warp(img, 1, 1),
+                    "C": lambda img: warp(img, 1, 1),
+                    "noC": lambda img: img,
+                    "cE": lambda img: warp(img, 1, 1),
+                    "bE": lambda img: img
                     }
 TOTAL_NUM_WORLDS = len(p) + 1
 
@@ -34,9 +35,6 @@ CORNER_DIM = 32
 IMG_DIM = CORNER_DIM*2
 BLK_SQR = np.zeros((CORNER_DIM,CORNER_DIM))
 
-# why do we vary "causal"?
-# causal entity or process
-# to do: clean up handling of case where cf
 def generate_worlds(mnist, n=1, cf = False, transform=True):
 
     scenarios = [] # a scenario is an actual world and its cfs
@@ -67,30 +65,24 @@ def imgs_of_worlds(worlds, mnist):
     four_img, three_img = num_from_mnist(NUM1, mnist), num_from_mnist(NUM2, mnist)
     return [img_of_world(world, four_img, three_img) for world in worlds]
 
+# note: BLK_SQR is all 0's; assumes no preprocessing
 def img_of_world(world, four_img, three_img):
     nums, utt = reformat(world)[0], reformat(world)[1]
 
     # set numbers in corners if they're in the world
     top_left = four_img if nums[0] else BLK_SQR
     bottom_right = three_img if nums[1] else BLK_SQR
-
-    # TEMP
-    temp = top_left
-    save_image(torch.from_numpy(viewable_img(top_left)), "original.png")
-    for event in world:
-        temp = event_functions[event](top_left)
-    save_image(torch.from_numpy(viewable_img(temp)), "modified.png")
-    # end TEMP
     
-    # apply nonlinear transformations
+    # apply nonlinear transformations; top_left is in interval [0,1]
     for event in world:
         if (event): top_left = event_functions[event](top_left)
-    top_left = clamp_img(top_left, standardized=True)
+    top_left = clamp_img(top_left, MNIST_MIN_COLOR, MNIST_MAX_COLOR)
 
     # put all four corner images together
-    return np.concatenate((np.concatenate((top_left, BLK_SQR), axis=1),
+    img = np.concatenate((np.concatenate((top_left, BLK_SQR), axis=1),
                       np.concatenate((BLK_SQR, bottom_right), axis=1)),
                      axis=0)
+    return standardize_img(img, from_unit_interval=True)
 
 def reformat(world):
     if(world["causal"]):
@@ -151,12 +143,12 @@ def load_mnist(root):
 
     # TODO: only get relevant digit values.
     train_data = {
-        'digits': np.concatenate([standardize_img(img, from_unit_interval=True) for img,label in train_loader], axis = 0)[:,0,...],
-        'labels': np.concatenate([label.numpy() for img,label in train_loader], axis = 0),
+        'digits': np.concatenate([imgs.numpy()*MAX_COLOR for imgs,labels in train_loader], axis = 0)[:,0,...],
+        'labels': np.concatenate([labels.numpy() for imgs,labels in train_loader], axis = 0),
     }
     test_data = {
-        'digits': np.concatenate([standardize_img(img, from_unit_interval=True) for img, label in test_loader],axis = 0)[:,0,...],
-        'labels': np.concatenate([label.numpy() for img,label in train_loader], axis = 0),
+        'digits': np.concatenate([imgs.numpy()*MAX_COLOR for imgs, labels in test_loader],axis = 0)[:,0,...],
+        'labels': np.concatenate([labels.numpy() for imgs,labels in train_loader], axis = 0),
     }
 
     return train_data, test_data
@@ -169,14 +161,12 @@ def mnist_dir_setup(train):
     train_mnist, test_mnist = load_mnist(DATA_DIR)
     return train_mnist if train else test_mnist
 
-import copy
-
-A = 20, B = 30
-def warp(img):
+def warp(img, A, B):
     new_img = copy.deepcopy(img)
-    for (u,v), value in np.ndenumerate(img):
-        x = u + A *np.sin(2.0 * np.pi  * v / B)
-        new_img[x][y] = img[u][v]
+    for u in range(len(img)):
+        for v in range(len(img[0])):
+            x = int(u + A *np.sin(2.0 * np.pi  * v / B))
+            new_img[x][v] = img[u][v]
     return new_img
 
 if __name__ ==  "__main__":
@@ -196,9 +186,3 @@ if __name__ ==  "__main__":
     mnist= mnist_dir_setup(args.train)
 
     img = mnist["digits"][0]
-
-    save_image(torch.from_numpy(viewable_img(img)), "original.png")
-    #for key in event_functions: img = event_functions[key](img)
-    save_image(torch.from_numpy(viewable_img(img)), "modified.png")
-    breakpoint()
-    # generate_worlds(mnist, n=args.dataset_size, cf=True)

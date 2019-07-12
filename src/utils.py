@@ -6,24 +6,23 @@ import numpy as np
 
 MIN_COLOR = 0.0
 MAX_COLOR = 255.0
+MNIST_MIN_COLOR = 0.0
+MNIST_MAX_COLOR = 1.0
+PROCESSED_MIN_COLOR = -1.0
+PROCESSED_MAX_COLOR = 1.0
 
 EPSILON = 1e-3      # window around z to resample
 PRIOR_WEIGHT = .5   # weights for prior (as opposed to posterior) distribution
 
 # UTILS: PREPROCESSING
 
-def clamp_img(img, standardized = True):
+def clamp_img(img, minimum, maximum):
     if (type(img) is not np.ndarray):
         img = img.numpy()
 
-    if (standardized):
-        maximum, minimum = 1, -1
-    else:
-        maximum, minimum = MAX_COLOR, MIN_COLOR
-
     return np.maximum(np.minimum(img, maximum), minimum)
 
-def standardize_img(img, from_unit_interval = True):
+def standardize_img(img, from_unit_interval=False):
     img = copy.deepcopy(img)
     if (type(img) is not np.ndarray):
         img = img.numpy()
@@ -31,9 +30,10 @@ def standardize_img(img, from_unit_interval = True):
     if (not from_unit_interval):
         img /= MAX_COLOR
 
+    # scale image from [0,1] to [-1,1]
     img = (img * 2.0) - 1.0
 
-    return clamp_img(img, True)
+    return clamp_img(img, PROCESSED_MIN_COLOR, PROCESSED_MAX_COLOR)
 
 def viewable_img(img, from_unit_interval = False):
     img = copy.deepcopy(img)
@@ -43,7 +43,7 @@ def viewable_img(img, from_unit_interval = False):
     if (not from_unit_interval):
         img = (img + 1.0) / 2.0
 
-    return clamp_img(img * MAX_COLOR, False)
+    return clamp_img(img * MAX_COLOR, MIN_COLOR, MAX_COLOR)
 
 # UTILS: TRAINING
 
@@ -75,6 +75,7 @@ class LossTracker():
 
     def update(self, loss_kind="loss", epoch=0, val=0, n=1):
         if (loss_kind not in self.loss_kinds):
+            assert(epoch == 0)
             meter = AverageMeter()
             self.loss_kinds[loss_kind] = [meter]
 
@@ -99,12 +100,14 @@ def frozen_params(module):
 def to_percent(float):
     return np.around(float*100, decimals=2)
 
-# UNTILS: RESAMPLING WITH ALI
+# UTILS: RESAMPLING WITH ALI
 
 def nearby(sample, z):
     return z - EPSILON <= sample and sample <= z + EPSILON
 
-def normal_resample(mean=0, var=1):
+# resamples from given dist until it finds something that
+# isn't close to z
+def normal_resample(z, mean=0, var=1):
     cf = np.random.normal(mean, var, batch_size)
     for img in batch_size:
         while (nearby(cf[img], z)):
@@ -116,14 +119,14 @@ def resample(z, post_mean, post_var, sample_from):
     latent_dim = z.size(1)
 
     if (sample_from == prior):
-        return normal_resample()
+        return normal_resample(z)
     elif (sample_from == "post"):
-        return normal_resample(post_mean, post_var)
+        return normal_resample(z, post_mean, post_var)
     elif (sample_from == "mix"):
-        if (np.random.binomial(1,PRIOR_WEIGHT)):
-            return normal_resample()
+        if (np.random.binomial(z, 1, PRIOR_WEIGHT)):
+            return normal_resample(z)
         else:
-            return normal_resample(post_mean, post_var)
+            return normal_resample(z, post_mean, post_var)
 
 def latent_cfs(z, post_mean, post_var, sample_from = "prior"):
     assert( sample_from == "prior" or

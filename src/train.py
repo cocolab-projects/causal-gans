@@ -22,88 +22,7 @@ from utils import (LossTracker, AverageMeter, save_checkpoint, free_params, froz
 
 CLASSIFIER_LOSS_WT = 1.0
 
-def log_reg_loop(loader, model, mode, pbar=None):
-    loss_meter = AverageMeter()
-    
-    if (mode != "test"):
-        criterion = torch.nn.BCELoss()
-    else:
-        causal_loss_meter = AverageMeter()
-
-    for i, (imgs, labels) in enumerate(loader):
-        imgs,labels = imgs.to(device), labels.to(device).float()
-        outputs = model(imgs)
-
-        # if testing for accuracy, round outputs; else add dim to labels
-        if (mode == "test"):
-            outputs = np.rint(outputs.numpy().flatten())
-            labels = labels.numpy()
-        else:
-            labels = labels.unsqueeze(1)
-
-        # calculate loss
-        if (mode == "test"):
-            loss = (outputs == labels)
-            loss_amt = np.mean(loss)
-
-            causal_indices = np.where(labels == 1)
-            causal_loss = (outputs[causal_indices] == labels[causal_indices])
-            causal_loss_amt = np.mean(causal_loss)
-            causal_loss_meter.update(causal_loss_amt, len(causal_indices))
-        else:
-            loss = criterion(outputs,labels)
-            loss_amt = loss.item()
-
-        loss_meter.update(loss_amt, loader.batch_size)
-
-        if (mode == "train"):
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-    return loss_meter.avg, causal_loss_meter.avg
-
-def log_reg_run_epoch(loader, model, mode, epoch=0):
-    if (mode == "train"):
-        model.train()
-        avg_loss, _ = log_reg_loop(loader, model, mode)
-    else:
-        model.eval()
-        with torch.no_grad():
-            avg_loss, avg_causal_loss = log_reg_loop(loader, model, mode)
-
-    if (mode=="test"):
-            print('====> test accuracy: {}%'.format(to_percent(avg_loss)))
-            print('====> test accuracy on causal pics: {}%'.format(to_percent(avg_causal_loss)))
-    elif epoch % 20 == 0:
-            print('====> {} epoch {}\tloss: {:.4f}'.format(mode, epoch, avg_loss))
-    return avg_loss
-
-def load_checkpoint(folder='./', filename='model_best.pth.tar'):
-    checkpoint = torch.load(folder + filename)
-    epoch = checkpoint['epoch']
-    loss_tracker = checkpoint['loss_tracker']
-    classifier = checkpoint['classifier']
-    GAN = checkpoint['GAN']
-    return epoch, loss_tracker, classifier, GAN
-
-def get_loss_d(wass, discriminator, imgs, gen_imgs, valid, fake):
-    if (wass):
-        return -torch.mean(discriminator(imgs)) + torch.mean(discriminator(gen_imgs))
-    else:
-        real_loss = torch.nn.BCELoss(discriminator(imgs), valid)
-        fake_loss = torch.nn.BCELoss(discriminator(gen_imgs), fake)
-        return (real_loss + fake_loss) / 2
-
-def get_loss_g(wass, discriminator, gen_imgs, valid):
-    if (wass):
-        return -torch.mean(discriminator(gen_imgs))
-    else:
-        return torch.nn.BCELoss(discriminator(gen_imgs), valid)
-
-def clip_discriminator(discriminator, clip_value):
-    for p in discriminator.parameters():
-        p.data.clamp_(-clip_value,clip_value)
+# ARGUMENTS; CHECKPOINTS AND PROGRESS WHILE TRAINING
 
 def handle_args():
     import argparse
@@ -141,12 +60,147 @@ def handle_args():
                         help="number of training steps for discriminator per iter")
     return parser.parse_args()
 
+def load_checkpoint(folder='./', filename='model_best.pth.tar'):
+    checkpoint = torch.load(folder + filename)
+    epoch = checkpoint['epoch']
+    loss_tracker = checkpoint['loss_tracker']
+    classifier = checkpoint['classifier']
+    GAN = checkpoint['GAN']
+    return epoch, loss_tracker, classifier, GAN
+
 def record_progress(epoch, epochs, batch, num_batches, loss_tracker):
     losses = [kind + ": " + str(loss_tracker.loss_kinds[kind].avg) for kind in loss_tracker.kinds]
     np.savetxt("./losses.txt", losses)
     progress = "[Epoch %d/%d] [Batch %d/%d]. Losses (running avg): %s" % (epoch, epochs, batch, num_batches, str(losses))
     print(progress)
 
+# COMPUTING LOSS FOR GAN (DISCRIMINATOR AND GENERATOR)
+
+def get_loss_d(wass, discriminator, imgs, gen_imgs, valid, fake):
+    if (wass):
+        return -torch.mean(discriminator(imgs)) + torch.mean(discriminator(gen_imgs))
+    else:
+        real_loss = torch.nn.BCELoss(discriminator(imgs), valid)
+        fake_loss = torch.nn.BCELoss(discriminator(gen_imgs), fake)
+        return (real_loss + fake_loss) / 2
+
+def get_loss_g(wass, discriminator, gen_imgs, valid):
+    if (wass):
+        return -torch.mean(discriminator(gen_imgs))
+    else:
+        return torch.nn.BCELoss(discriminator(gen_imgs), valid)
+
+# CLAMPING DISCRIMINATOR for GAN
+
+def clip_discriminator(discriminator, clip_value):
+    for p in discriminator.parameters():
+        p.data.clamp_(-clip_value,clip_value)
+
+# LOGISTIC REGRESSION TRAINING
+
+# single pass over all data
+def log_reg_loop(loader, model, mode, optimizer, pbar=None):
+    loss_meter = AverageMeter()
+    loss_tracker = LossTracker()
+    
+    if (mode != "test"):
+        criterion_log_reg = torch.nn.BCELoss()
+    else:
+        causal_loss_meter = AverageMeter()
+
+    for i, (imgs, labels) in enumerate(loader):
+        imgs,labels = imgs.to(device), labels.to(device).float()
+        outputs = model(imgs)
+
+        # if testing for accuracy, round outputs; else add dim to labels
+        if (mode == "test"):
+            outputs = np.rint(outputs.numpy().flatten())
+            labels = labels.numpy()
+        else:
+            labels = labels.unsqueeze(1)
+
+        # calculate loss
+        if (mode == "test"):
+            loss = (outputs == labels)
+            loss_amt = np.mean(loss)
+
+            causal_indices = np.where(labels == 1)
+            causal_loss = (outputs[causal_indices] == labels[causal_indices])
+            causal_loss_amt = np.mean(causal_loss)
+            loss_tracker.update("causal_loss", causal_loss_amt, len(causal_indices))
+        else:
+            loss = criterion_log_reg(outputs,labels)
+            loss_amt = loss.item()
+
+        loss_tracker.update(mode + "_loss", loss_amt, loader.batch_size)
+
+        if (mode == "train"):
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+        record_progress(epoch, args.epochs, i, len(train_loader), loss_tracker)
+
+    return loss_meter.avg, causal_loss_meter.avg
+
+# sets model appropriately, calls log_reg_loop, and reports results
+def log_reg_run_epoch(loader, model, mode, tracker=None, epoch=0, optimizer = None):
+    if (mode == "train"):
+        model.train()
+        assert(optimizer is not None)
+        avg_loss, _ = log_reg_loop(loader, model, mode, optimizer)
+    else:
+        model.eval()
+        with torch.no_grad():
+            avg_loss, avg_causal_loss = log_reg_loop(loader, model, mode, None)
+
+    if (mode=="test"):
+            print('====> test accuracy: {}%'.format(to_percent(avg_loss)))
+            print('====> test accuracy on causal pics: {}%'.format(to_percent(avg_causal_loss)))
+    elif epoch % 20 == 0:
+            print('====> {} epoch {}\tloss: {:.4f}'.format(mode, epoch, avg_loss))
+    return avg_loss
+
+# test log reg
+def test_log_reg_from_checkpoint(args, cf):
+    test_dataset = CausalMNIST(split='test',cf=cf)
+    test_loader = DataLoader(test_dataset, shuffle=True, batch_size=args.batch_size)
+
+    test_model = LogisticRegression(cf)
+    _,_,classifier,GAN = load_checkpoint(folder=args.out_dir)
+    test_model.load_state_dict(classifier)
+    log_reg_run_epoch(test_loader, test_model, "test")
+
+# train/test/validate log reg
+def log_reg(train_loader, args, cf):
+    model = LogisticRegression(cf).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(args.b1, args.b2))
+
+    valid_dataset = CausalMNIST(split="validate", cf=cf)
+    valid_loader = DataLoader(valid_dataset, shuffle=True, batch_size=args.batch_size)
+
+    tracker = LossTracker()
+
+    for epoch in range(int(args.epochs)):
+        train_loss = log_reg_run_epoch(train_loader, model, "train", tracker, epoch, optimizer)
+        validate_loss = log_reg_run_epoch(valid_loader, model, "validate", tracker, epoch)
+            
+        tracker.best_loss = min(validate_loss, tracker.best_loss)
+        tracker.update("train_loss_log_reg", epoch, train_loss.item())
+        tracker.update("validate_loss_log_reg", epoch, validate_loss.item())
+
+        save_checkpoint({
+            'epoch': epoch,
+            'classifier': model.state_dict(),
+            'GAN': 0,
+            'loss_tracker': tracker,
+            'cmd_line_args': args,
+            'seed': args.seed
+        }, tracker.best_loss == validate_loss, folder = args.out_dir)
+
+    test_log_reg_from_checkpoint(args, cf)
+
+# MAIN: TRAINS GANs
 if __name__ == "__main__":
     # args
     args = handle_args()
@@ -155,16 +209,20 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    # train, validate, test
     cf = False
-    transform = False
-    wass = True
-    attach_classifier = True
+    transform = True
 
     train_dataset = CausalMNIST(split="train", cf=cf, transform=transform)
     train_loader = DataLoader(train_dataset, shuffle=True, batch_size=args.batch_size)
 
-    # GAN
+    # train linear model alone
+    log_reg(train_loader=train_loader, args=args, cf=cf)
+
+    """
+    # train GANs
+    wass = True
+    attach_classifier = True
+
     generator = Generator(latent_dim=args.latent_dim, cf=cf, wass=wass)
     discriminator = Discriminator(cf=cf, wass=wass)
     # optimizer is set by constructor depending on the value of wass
@@ -263,10 +321,5 @@ if __name__ == "__main__":
             }, loss_tracker.best_loss == validate_loss, folder = args.out_dir)
 
     # test
-    test_dataset = CausalMNIST(split='test',cf=cf)
-    test_loader = DataLoader(test_dataset, shuffle=True, batch_size=args.batch_size)
-
-    test_model = LogisticRegression(cf)
-    _,_,classifier,GAN = load_checkpoint(folder=args.out_dir)
-    test_model.load_state_dict(classifier)
-    log_reg_run_epoch(test_loader, test_model, "test")
+    test_log_reg_from_checkpoint(args, cf)
+    """
