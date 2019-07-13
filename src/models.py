@@ -1,3 +1,11 @@
+"""
+models.py
+
+Credit for GAN code goes to eriklindernoren
+
+@author mmosse19
+@version July 2019
+"""
 import numpy as np
 
 import torch 

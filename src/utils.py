@@ -73,13 +73,22 @@ class LossTracker():
         self.loss_kinds = {}
         self.best_loss = float('inf')
 
-    def update(self, loss_kind="loss", epoch=0, val=0, n=1):
-        if (loss_kind not in self.loss_kinds):
+    def update(self, epoch, kind, val, n=1):
+        # first update for first epoch
+        if (kind not in self.loss_kinds):
             assert(epoch == 0)
             meter = AverageMeter()
-            self.loss_kinds[loss_kind] = [meter]
+            self.loss_kinds[kind] = [meter]
 
-        self.loss_kinds[loss_kind][epoch].update(val, n)
+        # first update for (n+1)th epoch
+        if (epoch >= len(self.loss_kinds[kind])):
+            meter = AverageMeter()
+            self.loss_kinds[kind].append(meter)
+
+        self.loss_kinds[kind][epoch].update(val, n)
+
+    def __getitem__(self, kind):
+        return self.loss_kinds[kind]
 
 def save_checkpoint(state, is_best, folder='./', filename='checkpoint.pth.tar'):
     if not os.path.isdir(folder):
