@@ -26,11 +26,12 @@ NUM1 = 4
 NUM2 = 3
 
 p = {"causal": .5, "C": .8, "noC": .8, "cE": .6, "bE": .5}
+# TODO: when to apply functions?
 event_functions = { "causal": lambda img: warp(img, 1, 1),
                     "C": lambda img: warp(img, 1, 1),
-                    "noC": lambda img: img,
+                    "noC": False,
                     "cE": lambda img: warp(img, 1, 1),
-                    "bE": lambda img: img
+                    "bE": False
                     }
 VARIABLES = list(p.keys())
 TOTAL_NUM_WORLDS = len(p) + 1
@@ -39,6 +40,20 @@ CORNER_DIM = 32
 IMG_DIM = CORNER_DIM*2
 BLK_SQR = np.zeros((CORNER_DIM,CORNER_DIM))
 
+def warp(img, A, B):
+    new_img = copy.deepcopy(img)
+    for old_x in range(CORNER_DIM):         # int(len(img)/2)
+        for y in range(CORNER_DIM):         # int(len(img[0])/2)
+            x = int(old_x + A *np.sin(2.0 * np.pi  * y / B))
+            new_img[x][y] = img[old_x][y]
+    return new_img
+
+def enforce_rules(world):
+    if (world["C"] and not world["causal"]):
+        world["causal"] = False
+    if (world["cE"] and not world["C"]):
+        world["cE"] = False
+
 def generate_worlds(mnist, n, cf = False, transform=True):
     num1_locs = np.where(mnist["labels"] == NUM1)[0]
     num2_locs = np.where(mnist["labels"] == NUM2)[0]
@@ -46,6 +61,7 @@ def generate_worlds(mnist, n, cf = False, transform=True):
     scenarios = [] # a scenario is an actual world and its cfs
     for i in range(n):
         act_world = {key: np.random.binomial(1,p[key]) for key in p.keys()}
+        enforce_rules(act_world)
 
         if (cf):
             cf_worlds = generate_cf_worlds(act_world)
@@ -69,10 +85,8 @@ def num_from_mnist(mnist, locs):
 
 def imgs_of_worlds(worlds, mnist, transform, num1_locs, num2_locs):
     num1_img = num_from_mnist(mnist, num1_locs)
-    num2_img = num_from_mnist(mnist, num2_locs)
-    imgs = [img_of_world(world, num1_img, num2_img, transform) for world in worlds]
-    
-    return imgs
+    num2_img = num_from_mnist(mnist, num2_locs)    
+    return [img_of_world(world, num1_img, num2_img, transform) for world in worlds]
 
 # note: BLK_SQR is all 0's; assumes no preprocessing (else, BLK_SQR would be all -1's)
 def img_of_world(world, num1_img, num2_img, transform):
@@ -81,14 +95,11 @@ def img_of_world(world, num1_img, num2_img, transform):
     # set numbers in corners if they're in the world
     top_left = num1_img if nums[0] else BLK_SQR
     bottom_right = num2_img if nums[1] else BLK_SQR
-
-    all_possible_imgs(top_left)
-    breakpoint()
-    
+   
     # apply nonlinear transformations; note that pixels are in interval [0,1]
     if (transform):
         for event in world:
-            if (world[event]): top_left = event_functions[event](top_left)
+            if (event_functions[event] and world[event]): top_left = event_functions[event](top_left)
         top_left = clamp_img(top_left, MNIST_MIN_COLOR, MNIST_MAX_COLOR)
 
     # put all four corner images together
@@ -96,10 +107,8 @@ def img_of_world(world, num1_img, num2_img, transform):
                       np.concatenate((BLK_SQR, bottom_right), axis=1)),
                      axis=0)
 
-    # moves image from [0,1] to [-1,1]
-    img = standardize_img(img, from_unit_interval=True)
-
-    return img
+    # move image from [0,1] to [-1,1]
+    return standardize_img(img, from_unit_interval=True)
 
 def reformat(world):
     if(world["causal"]):
@@ -132,31 +141,31 @@ Given an actual set of values for the random variables, generate a list of
 counterfactuals by flipping each of the random variables, one at a time
 """
 def generate_cf_worlds(act_world):
-    return [flip_rvs(act_world, key_to_vary) for key_to_vary in act_world]
+    return [enforce_rules(flip_rvs(act_world, key_to_vary)) for key_to_vary in act_world]
 
-# note that we don't actually *need* to look at all possible worlds if distortions are the same
 def all_possible_imgs(start_img):
-    all_possible_worlds = []
+    all_functions = [fn for fn in event_functions.values() if fn]
+    all_function_combinations = []
 
-    for values in list(itertools.product([0,1], repeat=len(VARIABLES))):
-        w = dict([(variable, value) for variable,value in zip(VARIABLES,values)])
-        all_possible_worlds.append(w)
+    for values in list(itertools.product([0,1], repeat=len(all_functions))):
+        combo = dict([(fn, value) for fn,value in zip(all_functions, values)])
+        all_function_combinations.append(combo)
 
-    i = 0
-    for world in all_possible_worlds:
+    # combo is a tuple, saying which functions to apply (e.g., (1,0,0,1,0))
+    for i, combo in enumerate(all_function_combinations):
         img = copy.deepcopy(start_img)
-        num_changes = 0
-        for event in world:
-            if (world[event]):
-                img = event_functions[event](img)
-                num_changes += 1
-        print(num_changes)
+
+        for fn, fn_indicator in combo.items():
+            if (fn_indicator):
+                img = fn(img)
+
         img = clamp_img(img, MNIST_MIN_COLOR, MNIST_MAX_COLOR)
         save_image(torch.from_numpy(img), "modified " + str(i) + ".png")
-        i += 1
+
+    breakpoint()
 
 # images' pixels are in interval [0,1]
-def load_mnist(root, train):
+def load_mnist(root, test):
     train_loader = torch.utils.data.DataLoader(
         dset.MNIST(
             root=root,
@@ -171,7 +180,7 @@ def load_mnist(root, train):
     test_loader = torch.utils.data.DataLoader(
         dset.MNIST(
             root=root,
-            train=True,
+            train=False,
             download=True,
             transform=transform.Compose([transform.Resize(CORNER_DIM), transform.ToTensor()])
         ),
@@ -180,7 +189,7 @@ def load_mnist(root, train):
     )
     
 
-    (loader, data_kind) = (train_loader, "train") if train else (test_loader, "test")
+    (loader, data_kind) = (test_loader, "test") if test else (train_loader, "train/validate")
 
     print("retrieving " + data_kind + " data from mnist...")
     data = {
@@ -191,19 +200,11 @@ def load_mnist(root, train):
     return data
 
 # might be worth using pathlib
-def mnist_dir_setup(train):
+def mnist_dir_setup(test):
     if not os.path.isdir(DATA_DIR):
         os.makedirs(DATA_DIR)
 
-    return load_mnist(DATA_DIR, train)
-
-def warp(img, A, B):
-    new_img = copy.deepcopy(img)
-    for u in range(len(img)):
-        for v in range(len(img[0])):
-            x = int(u + A *np.sin(2.0 * np.pi  * v / B))
-            new_img[x][v] = img[u][v]
-    return new_img
+    return load_mnist(DATA_DIR, test)
 
 if __name__ ==  "__main__":
     import argparse
@@ -211,12 +212,12 @@ if __name__ ==  "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=42,
                         help='random seed [default: 42]')
-    parser.add_argument('--train', action='store_true', default=True,
-                        help='sample digits from train set of MNIST [default: True]')
+    parser.add_argument('--test', action='store_true', default=False,
+                        help='sample digits from test set of MNIST [default: False]')
     parser.add_argument('--dataset_size', type=int, default=10,
                         help='number of images in dataset [default: 10]')
     args = parser.parse_args()
 
     np.random.seed(args.seed)
 
-    mnist= mnist_dir_setup(args.train)
+    mnist= mnist_dir_setup(args.test)

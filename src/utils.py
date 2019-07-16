@@ -43,7 +43,9 @@ def viewable_img(img, from_unit_interval = False):
     if (not from_unit_interval):
         img = (img + 1.0) / 2.0
 
-    return clamp_img(img * MAX_COLOR, MIN_COLOR, MAX_COLOR)
+    img = clamp_img(img * MAX_COLOR, MIN_COLOR, MAX_COLOR)
+
+    return torch.from_numpy(img)
 
 # UTILS: TRAINING
 
