@@ -1,3 +1,11 @@
+"""
+models.py
+
+Credit for GAN code goes to eriklindernoren
+
+@author mmosse19
+@version July 2019
+"""
 import numpy as np
 
 import torch 
@@ -10,6 +18,7 @@ class LogisticRegression(nn.Module):
         super(LogisticRegression, self).__init__()
         if (cf): input_dim *=TOTAL_NUM_WORLDS
         self.linear = torch.nn.Linear(input_dim, output_dim)
+        self.criterion = torch.nn.BCELoss()
 
     def forward(self, img):
         batch_sz = img.size(0)
@@ -52,6 +61,7 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
 
         self.optimizer = torch.optim.RMSprop if wass else torch.optim.Adam
+        self.criterion = torch.nn.BCELoss()
 
         # if we're including counterfactual imgs in training, they're concatenated, so we need to increase height
         if (cf): img_height *= TOTAL_NUM_WORLDS
