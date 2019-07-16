@@ -211,17 +211,6 @@ def run_log_reg(train_loader, valid_loader, test_loader, args, cf, tracker):
     for epoch in range(int(args.epochs)):
         train_loss = log_reg_run_epoch(train_loader, model, "train", epoch, args.epochs, tracker, optimizer)
         validate_loss = log_reg_run_epoch(valid_loader, model, "validate", epoch, args.epochs, tracker)
-            
-        tracker.best_loss = min(validate_loss, tracker.best_loss)
-
-        save_checkpoint({
-            'epoch': epoch,
-            'classifier': model.state_dict(),
-            'GAN': 0,
-            'tracker': tracker,
-            'cmd_line_args': args,
-            'seed': args.seed
-        }, tracker.best_loss == validate_loss, folder = args.out_dir)
 
     test_log_reg_from_checkpoint(test_loader, tracker, args, cf)
 
@@ -240,7 +229,7 @@ def get_causal_mnist_loaders(gan_size, cf, transform):
     train_mnist = mnist_dir_setup(test=False)
     test_mnist = mnist_dir_setup(test=True)
 
-    # TODO: should train and valid come from the same MNIST database?
+    # TODO: should train and valid come from the same MNIST database, or some split of it?
     train = CausalMNIST(split="train", mnist=train_mnist, gan_size=gan_size, cf=cf, transform=transform)
     valid = CausalMNIST(split="validate", mnist=train_mnist, gan_size=gan_size, cf=cf, transform=transform)
     test = CausalMNIST(split="test", mnist=test_mnist, gan_size=gan_size, cf=cf, transform=transform)
@@ -248,6 +237,13 @@ def get_causal_mnist_loaders(gan_size, cf, transform):
     train_loader = DataLoader(train, shuffle=True, batch_size=args.batch_size)
     valid_loader = DataLoader(valid, shuffle=True, batch_size=args.batch_size)
     test_loader = DataLoader(test, shuffle=True, batch_size=args.batch_size)
+
+    loader = DataLoader(train, shuffle=True, batch_size=100)
+    # sanity check
+    title = "sanity_check.png"
+    for batch_num, (imgs, labels) in enumerate(loader):
+        save_image(viewable_img(imgs.data), title, nrow=10)
+    breakpoint()
 
     return train_loader, valid_loader, test_loader
 
@@ -279,7 +275,7 @@ if __name__ == "__main__":
         breakpoint()    # prevents GAN from training
 
     # Option 2: GAN, with the option to attach a linear classifier
-    wass = True
+    wass = False
     attach_classifier = False
 
     # setup models and optimizers
@@ -352,4 +348,4 @@ if __name__ == "__main__":
             validate_loss = log_reg_run_epoch(valid_loader, log_reg, "validate", epoch, args.epochs, tracker)
 
     # test
-    test_log_reg_from_checkpoint(test_loader, tracker, args, cf)
+    if (attach_classifier): test_log_reg_from_checkpoint(test_loader, tracker, args, cf)
