@@ -1,7 +1,8 @@
 """
 models.py
 
-Credit for GAN code goes to eriklindernoren
+Credit for generator/discriminator goes to eriklindernoren
+Credit for inference net goes to mhw32
 
 @author mmosse19
 @version July 2019
@@ -82,3 +83,42 @@ class Discriminator(nn.Module):
         validity = self.model(img_flat)
 
         return validity
+
+class InferenceNet(nn.Module):
+    def __init__(self, channels, img_size, z_dim):
+        super(InferenceNet, self).__init__()
+        self.model = nn.Sequential(
+            nn.Conv2d(channels, 128, 3, stride=1, padding=1),
+            nn.BatchNorm2d(128, momentum=0.9),
+            nn.LeakyReLU(0.1, inplace=True),
+            # -
+            nn.Conv2d(128, 128, 4, stride=2, padding=1),
+            nn.BatchNorm2d(128, momentum=0.9),
+            nn.LeakyReLU(0.1, inplace=True),
+            # -
+            nn.Conv2d(128, 128, 4, stride=2, padding=1),
+            nn.BatchNorm2d(128, momentum=0.9),
+            nn.LeakyReLU(0.1, inplace=True),
+            # -
+            nn.Conv2d(128, 128, 4, stride=2, padding=1),
+            nn.BatchNorm2d(128, momentum=0.9),
+            nn.LeakyReLU(0.1, inplace=True),
+            # -
+            nn.Conv2d(128, 128, 4, stride=2, padding=1),
+            nn.BatchNorm2d(128, momentum=0.9),
+            nn.LeakyReLU(0.1, inplace=True))
+        # The height and width of downsampled image
+        self.fc = nn.Linear(2048, z_dim * 2)
+
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5*logvar)
+        eps = torch.randn_like(std)
+        return eps.mul(std).add_(mu)
+
+    def forward(self, img):
+        out = self.model(img)
+        out = out.view(out.shape[0], -1)
+        z_params = self.fc(out)
+        z_mu, z_logvar = torch.chunk(z_params, 2, dim=1)
+
+        return z_mu, z_logvar

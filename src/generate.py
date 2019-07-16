@@ -25,14 +25,7 @@ DATA_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), "../data")
 NUM1 = 4
 NUM2 = 3
 
-p = {"causal": .5, "C": .8, "noC": .8, "cE": .6, "bE": .5}
-# TODO: when to apply functions?
-event_functions = { "causal": lambda img: warp(img, 1, 1),
-                    "C": lambda img: warp(img, 1, 1),
-                    "noC": False,
-                    "cE": lambda img: warp(img, 1, 1),
-                    "bE": False
-                    }
+p = {"C": .8, "nC": .8, "cE": .6, "bE": .5}
 VARIABLES = list(p.keys())
 TOTAL_NUM_WORLDS = len(p) + 1
 
@@ -48,12 +41,6 @@ def warp(img, A, B):
             new_img[x][y] = img[old_x][y]
     return new_img
 
-def enforce_rules(world):
-    if (world["C"] and not world["causal"]):
-        world["causal"] = False
-    if (world["cE"] and not world["C"]):
-        world["cE"] = False
-
 def generate_worlds(mnist, n, cf = False, transform=True):
     num1_locs = np.where(mnist["labels"] == NUM1)[0]
     num2_locs = np.where(mnist["labels"] == NUM2)[0]
@@ -61,7 +48,6 @@ def generate_worlds(mnist, n, cf = False, transform=True):
     scenarios = [] # a scenario is an actual world and its cfs
     for i in range(n):
         act_world = {key: np.random.binomial(1,p[key]) for key in p.keys()}
-        enforce_rules(act_world)
 
         if (cf):
             cf_worlds = generate_cf_worlds(act_world)
@@ -97,9 +83,8 @@ def img_of_world(world, num1_img, num2_img, transform):
     bottom_right = num2_img if nums[1] else BLK_SQR
    
     # apply nonlinear transformations; note that pixels are in interval [0,1]
-    if (transform):
-        for event in world:
-            if (event_functions[event] and world[event]): top_left = event_functions[event](top_left)
+    if (transform) and (world["C"] and world["cE"]):
+        top_left = warp(top_left, 1, 1)
         top_left = clamp_img(top_left, MNIST_MIN_COLOR, MNIST_MAX_COLOR)
 
     # put all four corner images together
@@ -111,19 +96,10 @@ def img_of_world(world, num1_img, num2_img, transform):
     return standardize_img(img, from_unit_interval=True)
 
 def reformat(world):
-    if(world["causal"]):
-        num1 = NUM1 if world["C"] else ""
-        num2 = NUM2 if ((world["C"] and world["cE"]) or world["bE"]) else ""
-
-        nums = [num1, num2]
-        utt = (("causal " + str(num1)) if str(num1) else "") + str(num2)
-    else:
-        num1 = NUM1 if world["noC"] else ""
-        num2 = NUM2 if world["bE"] else ""
-
-        nums = [num1, num2]
-        utt = str(num1) + str(num2)
-    return nums, utt
+    num1 = NUM1 if world["C"] or world["nC"] else ""
+    num2 = NUM2 if ((world["C"] and world["cE"]) or world["bE"]) else ""
+    utt = ("causal" if (world["C"] and world["cE"]) else "") + str(num1) + str(num2)
+    return [num1, num2], utt
 
 def flip_rv(actual, key, key_to_vary):
     a = actual[key]
@@ -143,26 +119,15 @@ counterfactuals by flipping each of the random variables, one at a time
 def generate_cf_worlds(act_world):
     return [enforce_rules(flip_rvs(act_world, key_to_vary)) for key_to_vary in act_world]
 
-def all_possible_imgs(start_img):
-    all_functions = [fn for fn in event_functions.values() if fn]
-    all_function_combinations = []
-
-    for values in list(itertools.product([0,1], repeat=len(all_functions))):
-        combo = dict([(fn, value) for fn,value in zip(all_functions, values)])
-        all_function_combinations.append(combo)
-
-    # combo is a tuple, saying which functions to apply (e.g., (1,0,0,1,0))
-    for i, combo in enumerate(all_function_combinations):
-        img = copy.deepcopy(start_img)
-
-        for fn, fn_indicator in combo.items():
-            if (fn_indicator):
-                img = fn(img)
-
-        img = clamp_img(img, MNIST_MIN_COLOR, MNIST_MAX_COLOR)
-        save_image(torch.from_numpy(img), "modified " + str(i) + ".png")
-
-    breakpoint()
+# only grabs imgs/labels if they're num1 or num2
+def pick_imgs(loader):
+    data  = {'digits': [], 'labels': []}
+    for imgs,labels in loader:
+        for img, label in zip(imgs[:,0,...], labels):
+            if (label == NUM1 or label == NUM2):
+                data['digits'].append(img.numpy())
+                data['labels'].append(label.numpy())
+    return data
 
 # images' pixels are in interval [0,1]
 def load_mnist(root, test):
@@ -192,10 +157,7 @@ def load_mnist(root, test):
     (loader, data_kind) = (test_loader, "test") if test else (train_loader, "train/validate")
 
     print("retrieving " + data_kind + " data from mnist...")
-    data = {
-        'digits': np.concatenate([imgs.numpy() for imgs,labels in loader], axis = 0)[:,0,...],
-        'labels': np.concatenate([labels.numpy() for imgs,labels in loader], axis = 0),
-    }
+    data = pick_imgs(loader)
     print("retrieved " + data_kind + " data from mnist.")
     return data
 
