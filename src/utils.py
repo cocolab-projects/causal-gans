@@ -101,12 +101,10 @@ def save_checkpoint(state, is_best, folder='./', filename='checkpoint.pth.tar'):
                         os.path.join(folder, 'model_best.pth.tar'))
 
 def free_params(module):
-    for p in module.parameters():
-        p.requires_grad = True
+    for p in module.parameters(): p.requires_grad = True
 
 def frozen_params(module):
-    for p in module.parameters():
-        p.requires_grad = False
+    for p in module.parameters(): p.requires_grad = False
 
 def to_percent(float):
     return np.around(float*100, decimals=2)

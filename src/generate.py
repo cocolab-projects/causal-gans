@@ -42,8 +42,9 @@ def warp(img, A, B):
     return new_img
 
 def generate_worlds(mnist, n, cf = False, transform=True):
-    num1_locs = np.where(mnist["labels"] == NUM1)[0]
-    num2_locs = np.where(mnist["labels"] == NUM2)[0]
+    # TODO: remove useless typing
+    num1_locs = np.where(mnist["labels"] == np.asarray([NUM1]))[0]
+    num2_locs = np.where(mnist["labels"] == np.asarray([NUM2]))[0]
 
     scenarios = [] # a scenario is an actual world and its cfs
     for i in range(n):
@@ -102,8 +103,7 @@ def reformat(world):
     return [num1, num2], utt
 
 def flip_rv(actual, key, key_to_vary):
-    a = actual[key]
-    return not a if key == key_to_vary else a
+    return not actual[key] if key == key_to_vary else actual[key]
 
 """
 Given an actual set of values for the random variables, flip exactly one of
@@ -117,7 +117,7 @@ Given an actual set of values for the random variables, generate a list of
 counterfactuals by flipping each of the random variables, one at a time
 """
 def generate_cf_worlds(act_world):
-    return [enforce_rules(flip_rvs(act_world, key_to_vary)) for key_to_vary in act_world]
+    return [flip_rvs(act_world, key_to_vary) for key_to_vary in act_world]
 
 # only grabs imgs/labels if they're num1 or num2
 def pick_imgs(loader):
