@@ -156,17 +156,28 @@ def load_mnist(root, test):
 
     (loader, data_kind) = (test_loader, "test") if test else (train_loader, "train/validate")
 
-    print("retrieving " + data_kind + " data from mnist...")
-    data = pick_imgs(loader)
-    print("retrieved " + data_kind + " data from mnist.")
-    return data
+    return pick_imgs(loader)
 
 # might be worth using pathlib
 def mnist_dir_setup(test):
     if not os.path.isdir(DATA_DIR):
         os.makedirs(DATA_DIR)
 
-    return load_mnist(DATA_DIR, test)
+    data_kind = "test" if test else "train-validate"
+    file_name = "../data/mnist_{}.npy".format(data_kind)
+
+    if (os.path.isfile(file_name)):
+        print("retrieving {} mnist data from file...".format(data_kind))
+        data = np.load(file_name).item()
+        print("retrieved {} mnist data from file.".format(data_kind))
+        return data
+    else:
+        print("retrieving " + data_kind + " mnist data from online...")
+        data = load_mnist(DATA_DIR, test)
+        np.save(file_name, data)
+        print("retrieved " + data_kind + " mnist data from online.")
+
+    return data
 
 if __name__ ==  "__main__":
     import argparse
