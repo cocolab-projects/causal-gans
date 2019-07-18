@@ -287,7 +287,7 @@ if __name__ == "__main__":
         breakpoint()    # to prevent GAN from training
 
     # Option 2: GAN, with the option to attach a linear classifier
-    wass = False
+    wass = True
     attach_classifier = False
     attach_inference = False
 
