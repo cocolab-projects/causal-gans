@@ -4,8 +4,6 @@ train.py
 Much credit for GAN training goes to eriklindernoren, mhw32
 
 TODO:
-        (0) fix GAN
-        (1) cache data
         (2) add ALI
         (3) add generated cfs
         (4) ask mike about args
@@ -35,7 +33,7 @@ from models import (LogisticRegression, ConvGenerator, ConvDiscriminator, Infere
 from utils import (LossTracker, AverageMeter, save_checkpoint, free_params, frozen_params, to_percent, viewable_img)
 
 CLASSIFIER_LOSS_WT = 1.0
-SUPRESS_PRINT_STATEMENTS = False
+SUPRESS_PRINT_STATEMENTS = True 
 
 # ARGUMENTS; CHECKPOINTS AND PROGRESS WHILE TRAINING
 
@@ -272,7 +270,7 @@ if __name__ == "__main__":
     cf = False
     transform = True
     using_gan = True
-    train_on_mnist = True
+    train_on_mnist = False
 
     # set up data loaders, loss tracker
     
@@ -293,7 +291,7 @@ if __name__ == "__main__":
     # setup models and optimizers
     generator = ConvGenerator(args.latent_dim, wass, train_on_mnist).to(device)
     inference_net = InferenceNet(1, 64, args.latent_dim).to(device)
-    discriminator = ConvDiscriminator(wass).to(device)
+    discriminator = ConvDiscriminator(wass, train_on_mnist).to(device)
     classifier = LogisticRegression(cf).to(device)
 
     generator.train()
@@ -308,11 +306,12 @@ if __name__ == "__main__":
     optimizer_c = torch.optim.Adam(classifier.parameters(), lr=args.lr, betas=(args.b1, args.b2))
 
     # train (and validate, if attach_classifier)
-    pbar = tqdm(total = len(train_loader))
     for epoch in range(args.epochs):
+        pbar = tqdm(total = len(train_loader))
         # train
         for batch_num, (imgs, labels) in enumerate(train_loader):
             batch_size = imgs.size(0)
+            imgs = imgs.to(device)
 
             optimizer_d.zero_grad()
 
@@ -327,12 +326,18 @@ if __name__ == "__main__":
 
             # z ~ N(0,1)
             z = torch.randn(batch_size, args.latent_dim, device=device)
+            
+            # define q(z|x)
+            z_inf_mu, z_inf_logvar = inference_net(x.view(batch_size, 1, 64, 64)) # note: x may not be appropriate shape
 
-            # generate (batch_size) images
-            gen_imgs = generator(z)
+            # z_inf ~ q(z|x)
+            z_inf = reparameterize(z_inf_mu, z_inf_logvar)
+
+            # x ~ p(x | z)
+            z_g = generator(z)
 
             # train discriminator
-            loss_d = get_loss_d(wass, discriminator, imgs, gen_imgs, valid, fake)
+            loss_d = get_loss_d(wass, discriminator, z_g, gen_imgs, valid, fake)
             descend([optimizer_d], loss_d)
             record_progress(epoch, args.epochs, batch_num, len(train_loader), tracker, "train_loss_d", loss_d.item(), batch_size)
 

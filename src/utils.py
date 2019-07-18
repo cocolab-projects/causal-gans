@@ -126,6 +126,11 @@ def to_percent(float):
 
 # UTILS: RESAMPLING WITH ALI
 
+def reparameterize(mu, logvar):
+    std = torch.exp(0.5*logvar)
+    eps = torch.randn_like(std)
+    return eps.mul(std).add(mu)
+
 def nearby(sample, z):
     return z - EPSILON <= sample and sample <= z + EPSILON
 
