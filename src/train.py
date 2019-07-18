@@ -31,7 +31,8 @@ import torchvision.transforms as transform
 
 from generate import mnist_dir_setup
 from datasets import (CausalMNIST)
-from models import (LogisticRegression, Generator, Discriminator, InferenceNet)
+from models import (LogisticRegression, Generator, Discriminator,
+                    ConvGenerator, ConvDiscriminator, InferenceNet)
 from utils import (LossTracker, AverageMeter, save_checkpoint, free_params, frozen_params, to_percent, viewable_img)
 
 CLASSIFIER_LOSS_WT = 1.0
@@ -53,18 +54,18 @@ def handle_args():
     parser.add_argument('--lr', type=float, default=2e-4,
                         help='learning rate [default: 2e-4]')
     parser.add_argument('--lr_d', type=float, default=1e-5,    # previous value: 2e-5
-                        help='discriminator learning rate [default: 2e-5]')
+                        help='discriminator learning rate [default: 1e-5]')
     parser.add_argument('--epochs', type=int, default=101,
                         help='number of training epochs [default: 51]')
     parser.add_argument('--cuda', action='store_true',
                         help='Enable cuda')
-    parser.add_argument("--b1", type=float, default=0.5,
+    parser.add_argument("--b1", type=float, default=0.9,
                         help="adam: decay of first order momentum of gradient")
     parser.add_argument("--b2", type=float, default=0.999,
                         help="adam: decay of first order momentum of gradient")
 
     # for GANs
-    parser.add_argument("--latent_dim", type=int, default=100,
+    parser.add_argument("--latent_dim", type=int, default=40,
                         help="dimensionality of the latent space")
     parser.add_argument("--sample_interval", type=int, default=500,
                         help="interval betwen image samples")
@@ -277,7 +278,7 @@ if __name__ == "__main__":
     # set up data loaders, loss tracker
     
     train_loader, valid_loader, test_loader = get_causal_mnist_loaders(using_gan, cf, transform)
-    
+
     tracker = LossTracker()
 
     # Option 1: linear classifier alone
@@ -286,30 +287,34 @@ if __name__ == "__main__":
         breakpoint()    # to prevent GAN from training
 
     # Option 2: GAN, with the option to attach a linear classifier
-    wass = True
+    wass = False
     attach_classifier = False
     attach_inference = False
 
     # setup models and optimizers
-    generator = Generator(latent_dim=args.latent_dim, cf=cf, wass=wass, img_height=32, img_width=32).to(device)
-    inference_net = InferenceNet(1, 64, args.latent_dim).to(device)
-    discriminator = Discriminator(cf=cf, wass=wass, img_height=32, img_width=32).to(device)
+    generator = ConvGenerator(latent_dim=args.latent_dim, cf=cf, wass=wass, img_height=32, img_width=32).to(device)
+    # inference_net = InferenceNet(1, 64, args.latent_dim).to(device)
+    discriminator = ConvDiscriminator(cf=cf, wass=wass, img_height=32, img_width=32).to(device)
     classifier = LogisticRegression(cf).to(device)
 
     generator.train()
     discriminator.train()
-    inference_net.train()
+    # inference_net.train()
     classifier.train()
     
-    optimizer_g = generator.optimizer(chain(generator.parameters(),
-                                            inference_net.parameters()),
+    optimizer_g = generator.optimizer(chain(generator.parameters()),
+                                            # inference_net.parameters()),
                                             lr=args.lr)
     optimizer_d = discriminator.optimizer(discriminator.parameters(), lr=args.lr_d)
     optimizer_c = torch.optim.Adam(classifier.parameters(), lr=args.lr, betas=(args.b1, args.b2))
 
     # train (and validate, if attach_classifier)
     for epoch in range(args.epochs):
+        generator.train()
+        discriminator.train()
+
         # train
+        pbar = tqdm(total=len(train_loader))
         for batch_num, (imgs, labels) in enumerate(train_loader):
             # is the next line needed, if models all have .to(device)?
             imgs,labels = imgs.to(device), labels.to(device)
@@ -318,7 +323,7 @@ if __name__ == "__main__":
             optimizer_d.zero_grad()
 
             frozen_params(generator)
-            frozen_params(inference_net)
+            # frozen_params(inference_net)
             frozen_params(classifier)
             free_params(discriminator)
 
@@ -345,7 +350,7 @@ if __name__ == "__main__":
                 optimizer_g.zero_grad()
 
                 free_params(generator)
-                free_params(inference_net)
+                # free_params(inference_net)
                 free_params(classifier)
                 frozen_params(discriminator)
 
@@ -363,6 +368,8 @@ if __name__ == "__main__":
                 
                 descend(optimizers, total_loss)
                 tracker.update(epoch, "train_loss_total", total_loss.item(), batch_size)
+            pbar.update()
+        pbar.close()
 
         # finished training for epoch; print train loss, output images
         print('====> total train loss \t(epoch {}):\t {:.4f}'.format(epoch+1, tracker["train_loss_total"][epoch].avg))

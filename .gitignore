@@ -104,3 +104,8 @@ venv.bak/
 .mypy_cache/
 
 *.DS_Store
+
+data/
+*.png
+*.txt
+*.npy

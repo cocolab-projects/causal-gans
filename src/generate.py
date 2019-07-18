@@ -164,7 +164,11 @@ def mnist_dir_setup(test):
         os.makedirs(DATA_DIR)
 
     data_kind = "test" if test else "train-validate"
-    file_name = "../data/mnist_{}.npy".format(data_kind)
+
+    # get curdir
+    cur_dir = os.path.dirname(__file__)
+    file_name = os.path.join(cur_dir, "../data/mnist_{}.npy".format(data_kind))
+    file_name = os.path.realpath(file_name)
 
     if (os.path.isfile(file_name)):
         print("retrieving {} mnist data from file...".format(data_kind))
@@ -187,8 +191,6 @@ if __name__ ==  "__main__":
                         help='random seed [default: 42]')
     parser.add_argument('--test', action='store_true', default=False,
                         help='sample digits from test set of MNIST [default: False]')
-    parser.add_argument('--dataset_size', type=int, default=10,
-                        help='number of images in dataset [default: 10]')
     args = parser.parse_args()
 
     np.random.seed(args.seed)

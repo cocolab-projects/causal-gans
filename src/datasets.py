@@ -6,6 +6,7 @@ datasets.py
 """
 import os
 import json
+import copy
 import numpy as np
 from PIL import Image
 
@@ -26,7 +27,7 @@ VAL_PORTION = .2
 TRAIN_PORTION = 1.0 - VAL_PORTION
 
 # number of square images to generate
-GAN_DATA_LEN = 8000
+GAN_DATA_LEN = 11000
 LOG_REG_DATA_LEN = 1200
 
 DATA_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), "../data")
@@ -37,7 +38,7 @@ class CausalMNIST(Dataset):
         channels=1, classes=None, target_trials_only=False, cf=False, transform=True):
         super(CausalMNIST, self).__init__()
         self.root = root
-        self.mnist = mnist
+        self.mnist = copy.deepcopy(mnist)  # i think this was getting overwritten
         self.split = split
         self.img_transform = transforms.ToTensor()
 
@@ -70,10 +71,11 @@ class CausalMNIST(Dataset):
             self.length = int(causal_data_len*TEST_PORTION)
         else:
             raise RuntimeError("CausalMNIST was expecting split to be 'train', 'validate', or 'test'.")
-        
 
         # retrieve square images, using self.mnist and self.length
-        file_name = "../data/scenario_{}.npy".format(split)
+        cur_dir = os.path.dirname(__file__)
+        file_name = os.path.join(cur_dir, "../data/scenario_{}.npy".format(split))
+        file_name = os.path.realpath(file_name)
         if (os.path.isfile(file_name)):
             print("retrieving {} worlds from file...".format(split))
             scenarios = np.load(file_name)
@@ -88,7 +90,7 @@ class CausalMNIST(Dataset):
         self.labels = ["causal" in pt[1] for pt in scenarios]
 
     def __getitem__(self, index):
-        return self.mnist["digits"][index], self.mnist["labels"][index]
+        return self.mnist["digits"][index][np.newaxis, ...], self.mnist["labels"][index]
         # return self.imgs[index], self.labels[index]
 
     def __len__(self):
