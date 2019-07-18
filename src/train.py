@@ -31,10 +31,11 @@ import torchvision.transforms as transform
 
 from generate import mnist_dir_setup
 from datasets import (CausalMNIST)
-from models import (LogisticRegression, Generator, Discriminator, InferenceNet)
+from models import (LogisticRegression, ConvGenerator, ConvDiscriminator, InferenceNet)
 from utils import (LossTracker, AverageMeter, save_checkpoint, free_params, frozen_params, to_percent, viewable_img)
 
 CLASSIFIER_LOSS_WT = 1.0
+SUPRESS_PRINT_STATEMENTS = False
 
 # ARGUMENTS; CHECKPOINTS AND PROGRESS WHILE TRAINING
 
@@ -52,19 +53,19 @@ def handle_args():
                         help='batch size [default=64]')
     parser.add_argument('--lr', type=float, default=2e-4,
                         help='learning rate [default: 2e-4]')
-    parser.add_argument('--lr_d', type=float, default=1e-5,    # previous value: 2e-5
-                        help='discriminator learning rate [default: 2e-5]')
+    parser.add_argument('--lr_d', type=float, default=1e-5,
+                        help='discriminator learning rate [default: 1e-5]')
     parser.add_argument('--epochs', type=int, default=101,
                         help='number of training epochs [default: 51]')
     parser.add_argument('--cuda', action='store_true',
                         help='Enable cuda')
-    parser.add_argument("--b1", type=float, default=0.5,
+    parser.add_argument("--b1", type=float, default=0.9,
                         help="adam: decay of first order momentum of gradient")
     parser.add_argument("--b2", type=float, default=0.999,
                         help="adam: decay of first order momentum of gradient")
 
     # for GANs
-    parser.add_argument("--latent_dim", type=int, default=100,
+    parser.add_argument("--latent_dim", type=int, default=40,
                         help="dimensionality of the latent space")
     parser.add_argument("--sample_interval", type=int, default=500,
                         help="interval betwen image samples")
@@ -90,7 +91,7 @@ def record_progress(epoch, epochs, batch_num, num_batches, tracker, kind, amt, b
     loss = tracker[kind][epoch].avg
     progress = "[epoch {}/{}]\t[batch {}/{}]\t[{} (epoch running avg):\t\t{}]".format(epoch+1, epochs, batch_num+1, num_batches, kind, loss)
     
-    if (batch_num % 30 == 0): print(progress)
+    if (batch_num % 30 == 0) and not SUPRESS_PRINT_STATEMENTS: print(progress)
 
     # save tracker avgs (for each epoch) to file
     num_epochs_with_data = len(tracker[kind])
@@ -174,8 +175,6 @@ def log_reg_run_batch(batch_num, num_batches, imgs, labels, model, mode, epoch, 
 
 def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, optimizer):
     for batch_num, (imgs, labels) in enumerate(loader):
-        imgs,labels = imgs.to(device), labels.to(device)
-
         if (mode == "train"):
             log_reg_run_batch(batch_num, len(loader), imgs, labels, model, mode, epoch, epochs, tracker, optimizer)
         else:
@@ -232,13 +231,13 @@ def get_causal_mnist_dataset(mode, cf, transform, mnist):
     data = CausalMNIST(split=mode, mnist=mnist, cf=cf, transform=transform)
     return data
 
-def get_causal_mnist_loaders(using_gan, cf, transform):
+def get_causal_mnist_loaders(using_gan, cf, transform, train_on_mnist):
     train_mnist = mnist_dir_setup(test=False)
     test_mnist = mnist_dir_setup(test=True)
 
-    train = CausalMNIST(split="train", mnist=train_mnist, using_gan=using_gan, cf=cf, transform=transform)
-    valid = CausalMNIST(split="validate", mnist=train_mnist, using_gan=using_gan, cf=cf, transform=transform)
-    test = CausalMNIST(split="test", mnist=test_mnist, using_gan=using_gan, cf=cf, transform=transform)
+    train = CausalMNIST("train", train_mnist, using_gan, cf=cf, transform=transform, train_on_mnist=train_on_mnist)
+    valid = CausalMNIST("validate", train_mnist, using_gan, cf=cf, transform=transform, train_on_mnist=train_on_mnist)
+    test = CausalMNIST("test", test_mnist, using_gan, cf=cf, transform=transform, train_on_mnist=train_on_mnist)
 
     train_loader = DataLoader(train, shuffle=True, batch_size=args.batch_size)
     valid_loader = DataLoader(valid, shuffle=True, batch_size=args.batch_size)
@@ -273,10 +272,11 @@ if __name__ == "__main__":
     cf = False
     transform = True
     using_gan = True
+    train_on_mnist = True
 
     # set up data loaders, loss tracker
     
-    train_loader, valid_loader, test_loader = get_causal_mnist_loaders(using_gan, cf, transform)
+    train_loader, valid_loader, test_loader = get_causal_mnist_loaders(using_gan, cf, transform, train_on_mnist)
     
     tracker = LossTracker()
 
@@ -291,9 +291,9 @@ if __name__ == "__main__":
     attach_inference = False
 
     # setup models and optimizers
-    generator = Generator(latent_dim=args.latent_dim, cf=cf, wass=wass, img_height=32, img_width=32).to(device)
+    generator = ConvGenerator(args.latent_dim, wass, train_on_mnist).to(device)
     inference_net = InferenceNet(1, 64, args.latent_dim).to(device)
-    discriminator = Discriminator(cf=cf, wass=wass, img_height=32, img_width=32).to(device)
+    discriminator = ConvDiscriminator(wass).to(device)
     classifier = LogisticRegression(cf).to(device)
 
     generator.train()
@@ -308,11 +308,10 @@ if __name__ == "__main__":
     optimizer_c = torch.optim.Adam(classifier.parameters(), lr=args.lr, betas=(args.b1, args.b2))
 
     # train (and validate, if attach_classifier)
+    pbar = tqdm(total = len(train_loader))
     for epoch in range(args.epochs):
         # train
         for batch_num, (imgs, labels) in enumerate(train_loader):
-            # is the next line needed, if models all have .to(device)?
-            imgs,labels = imgs.to(device), labels.to(device)
             batch_size = imgs.size(0)
 
             optimizer_d.zero_grad()
@@ -326,7 +325,7 @@ if __name__ == "__main__":
             valid = torch.ones(imgs.size(0), 1, device=device)
             fake = torch.zeros(imgs.size(0), 1, device=device)
 
-            # z ~ N(0,1)      
+            # z ~ N(0,1)
             z = torch.randn(batch_size, args.latent_dim, device=device)
 
             # generate (batch_size) images
@@ -364,6 +363,8 @@ if __name__ == "__main__":
                 descend(optimizers, total_loss)
                 tracker.update(epoch, "train_loss_total", total_loss.item(), batch_size)
 
+            pbar.update()
+        pbar.close()
         # finished training for epoch; print train loss, output images
         print('====> total train loss \t(epoch {}):\t {:.4f}'.format(epoch+1, tracker["train_loss_total"][epoch].avg))
         save_images_from_g(generator, epoch+1, wass, args.latent_dim, args.batch_size)

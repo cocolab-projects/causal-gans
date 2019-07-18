@@ -12,7 +12,7 @@ import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 
-from utils import (clamp_img, standardize_img, viewable_img, MIN_COLOR, MAX_COLOR, MNIST_MIN_COLOR, MNIST_MAX_COLOR)
+from utils import (clamp_img, standardize_img, viewable_img, MNIST_MIN_COLOR, MNIST_MAX_COLOR, data_file_name)
 
 import torch
 import torch.utils.data
@@ -29,14 +29,14 @@ p = {"C": .8, "nC": .8, "cE": .6, "bE": .5}
 VARIABLES = list(p.keys())
 TOTAL_NUM_WORLDS = len(p) + 1
 
-CORNER_DIM = 32
-IMG_DIM = CORNER_DIM*2
-BLK_SQR = np.zeros((CORNER_DIM,CORNER_DIM))
+MNIST_IMG_DIM = 32
+IMG_DIM = MNIST_IMG_DIM*2
+BLK_SQR = np.zeros((MNIST_IMG_DIM,MNIST_IMG_DIM))
 
 def warp(img, A, B):
     new_img = copy.deepcopy(img)
-    for old_x in range(CORNER_DIM):         # int(len(img)/2)
-        for y in range(CORNER_DIM):         # int(len(img[0])/2)
+    for old_x in range(MNIST_IMG_DIM):
+        for y in range(MNIST_IMG_DIM):
             x = int(old_x + A *np.sin(2.0 * np.pi  * y / B))
             new_img[x][y] = img[old_x][y]
     return new_img
@@ -136,7 +136,7 @@ def load_mnist(root, test):
             root=root,
             train=True,
             download=True,
-            transform=transform.Compose([transform.Resize(CORNER_DIM), transform.ToTensor()])
+            transform=transform.Compose([transform.Resize(MNIST_IMG_DIM), transform.ToTensor()])
         ),
         batch_size = 500,
         shuffle=False
@@ -147,7 +147,7 @@ def load_mnist(root, test):
             root=root,
             train=False,
             download=True,
-            transform=transform.Compose([transform.Resize(CORNER_DIM), transform.ToTensor()])
+            transform=transform.Compose([transform.Resize(MNIST_IMG_DIM), transform.ToTensor()])
         ),
         batch_size = 500,
         shuffle=False
@@ -163,8 +163,9 @@ def mnist_dir_setup(test):
     if not os.path.isdir(DATA_DIR):
         os.makedirs(DATA_DIR)
 
+    # get cur dir
     data_kind = "test" if test else "train-validate"
-    file_name = "../data/mnist_{}.npy".format(data_kind)
+    file_name = data_file_name(prefix="mnist", suffix = data_kind)
 
     if (os.path.isfile(file_name)):
         print("retrieving {} mnist data from file...".format(data_kind))
@@ -187,8 +188,6 @@ if __name__ ==  "__main__":
                         help='random seed [default: 42]')
     parser.add_argument('--test', action='store_true', default=False,
                         help='sample digits from test set of MNIST [default: False]')
-    parser.add_argument('--dataset_size', type=int, default=10,
-                        help='number of images in dataset [default: 10]')
     args = parser.parse_args()
 
     np.random.seed(args.seed)

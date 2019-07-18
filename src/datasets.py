@@ -6,6 +6,7 @@ datasets.py
 """
 import os
 import json
+import copy
 import numpy as np
 from PIL import Image
 
@@ -14,6 +15,7 @@ from torch.utils.data.dataset import Dataset
 from torchvision import transforms
 
 from generate import generate_worlds
+from utils import data_file_name
 
 # Note: there are about 11,972 pnts in train_mnist that are 3s/4s
 
@@ -26,7 +28,7 @@ VAL_PORTION = .2
 TRAIN_PORTION = 1.0 - VAL_PORTION
 
 # number of square images to generate
-GAN_DATA_LEN = 8000
+GAN_DATA_LEN = 11000
 LOG_REG_DATA_LEN = 1200
 
 DATA_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), "../data")
@@ -34,19 +36,16 @@ CAUSAL_MNIST_DIR = os.path.join(DATA_DIR, 'causal_mnist')
 
 class CausalMNIST(Dataset):
     def __init__(self, split, mnist, using_gan, root=CAUSAL_MNIST_DIR,
-        channels=1, classes=None, target_trials_only=False, cf=False, transform=True):
+        cf=False, transform=True, train_on_mnist=False):
         super(CausalMNIST, self).__init__()
         self.root = root
-        self.mnist = mnist
+        self.mnist = copy.deepcopy(mnist)
         self.split = split
+        self.train_on_mnist = train_on_mnist
         self.img_transform = transforms.ToTensor()
 
         causal_data_len = GAN_DATA_LEN if using_gan else LOG_REG_DATA_LEN
 
-        """
-        start, end = 0, int(mnist_data_len*(TRAIN_PORTION+VAL_PORTION))
-        self.length = int(causal_data_len*(VAL_PORTION + TRAIN_PORTION))
-        """
         # if not test, then get length, to split train dataset into train/val
         if (split != "test"):
             mnist_data_len = len(self.mnist["labels"])
@@ -70,10 +69,9 @@ class CausalMNIST(Dataset):
             self.length = int(causal_data_len*TEST_PORTION)
         else:
             raise RuntimeError("CausalMNIST was expecting split to be 'train', 'validate', or 'test'.")
-        
 
         # retrieve square images, using self.mnist and self.length
-        file_name = "../data/scenario_{}.npy".format(split)
+        file_name = data_file_name(prefix = "scenario", suffix = split)
         if (os.path.isfile(file_name)):
             print("retrieving {} worlds from file...".format(split))
             scenarios = np.load(file_name)
@@ -88,9 +86,13 @@ class CausalMNIST(Dataset):
         self.labels = ["causal" in pt[1] for pt in scenarios]
 
     def __getitem__(self, index):
-        return self.mnist["digits"][index], self.mnist["labels"][index]
-        # return self.imgs[index], self.labels[index]
+        if (self.train_on_mnist):
+            return self.mnist["digits"][index][np.newaxis,...], self.mnist["labels"][index]
+        else:
+            return self.imgs[index], self.labels[index]
 
     def __len__(self):
-        return len(self.mnist["digits"])
-        # return self.length
+        if (self.train_on_mnist):
+            return len(self.mnist["digits"])
+        else:
+            return self.length

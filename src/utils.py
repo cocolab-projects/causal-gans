@@ -14,7 +14,23 @@ PROCESSED_MAX_COLOR = 1.0
 EPSILON = 1e-3      # window around z to resample
 PRIOR_WEIGHT = .5   # weights for prior (as opposed to posterior) distribution
 
-# UTILS: PREPROCESSING
+# UTILS: SAVING/READING FILES
+
+def data_file_name(prefix, suffix):
+    cur_dir = os.path.dirname(__file__)
+    file_name = os.path.join(cur_dir, "../data/{}_{}.npy".format(prefix, suffix))
+    return os.path.realpath(file_name)
+
+# UTILS: MODELS and PREPROCESSING
+
+def get_conv_output_dim(I, K, P, S):
+    # I = input height/length
+    # K = filter size
+    # P = padding
+    # S = stride
+    # O = output height/length
+    O = (I - K + 2*P)/float(S) + 1
+    return int(O)
 
 def clamp_img(img, minimum, maximum):
     if (type(img) is not np.ndarray):
@@ -66,7 +82,6 @@ class AverageMeter(object):
         self.count += n
         self.avg = self.sum / self.count
 
-# have losstracker us averagemeter
 class LossTracker():
     def __init__(self):
         self.reset()
