@@ -107,7 +107,7 @@ class ConvDiscriminator(nn.Module):
         )
         
         dim = 2048 if train_on_mnist else 8192
-        if (attach_inference): dim += z_dim
+#        if (attach_inference): dim += (z_dim+40)
         
         # The height and width of downsampled image
         self.adv_layer = nn.Sequential( 
@@ -119,7 +119,7 @@ class ConvDiscriminator(nn.Module):
     def forward(self, img, z=None):
         out = self.model(img)
         out = out.view(out.shape[0], -1)
-        if (attach_inference): torch.cat((out, z), dim=1)
+        if (self.attach_inference): torch.cat((out, z), dim=1)
         validity = self.adv_layer(out)
         return validity
 

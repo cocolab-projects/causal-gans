@@ -4,9 +4,7 @@ train.py
 Much credit for GAN training goes to eriklindernoren, mhw32
 
 TODO:
-        (2) add ALI
         (3) add generated cfs
-        (4) ask mike about args
 
 @author mmosse19
 @version July 2019
@@ -30,7 +28,7 @@ import torchvision.transforms as transform
 from generate import mnist_dir_setup
 from datasets import (CausalMNIST)
 from models import (LogisticRegression, ConvGenerator, ConvDiscriminator, InferenceNet)
-from utils import (LossTracker, AverageMeter, save_checkpoint, free_params, frozen_params, to_percent, viewable_img)
+from utils import (LossTracker, AverageMeter, save_checkpoint, free_params, frozen_params, to_percent, viewable_img, reparameterize)
 
 CLASSIFIER_LOSS_WT = 1.0
 SUPRESS_PRINT_STATEMENTS = True 
@@ -293,9 +291,9 @@ if __name__ == "__main__":
 
     # Option 2: GAN, with the option to attach a linear classifier
     # TODO: wass and attach_inference can't work together; loss is computed differently
-    wass = True
+    wass = False
     attach_classifier = False
-    attach_inference = False
+    attach_inference = True
 
     # setup models and optimizers
     generator = ConvGenerator(args.latent_dim, wass, train_on_mnist).to(device)
@@ -366,7 +364,7 @@ if __name__ == "__main__":
                 # x_g ~ p(x|z_prior)
                 x_g = generator(z_prior)
 
-                loss_g = get_loss_g(wass, discriminator, x, x_gen, valid, attach_classifier, z_prior, z_inf)
+                loss_g = get_loss_g(wass, discriminator, x, x_g, valid, attach_classifier, z_prior, z_inf)
                 record_progress(epoch, args.epochs, batch_num, len(train_loader), tracker, "train_loss_g", loss_g.item(), batch_size)
                 total_loss = loss_g
                 optimizers = [optimizer_g]
