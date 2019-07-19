@@ -123,6 +123,7 @@ def get_loss_g(wass, discriminator, x, x_g, valid, attach_inference, z_prior, z_
         pred_real = discriminator(x, z_inf)
         return torch.mean(F.softplus(pred_real)) + torch.mean(-F.softplus(pred_fake))
     else:
+        print("wass and attach_inference are both false")
         return discriminator.criterion(discriminator(x_g), valid)
 
 # CLAMPING DISCRIMINATOR FOR GAN
@@ -364,12 +365,14 @@ if __name__ == "__main__":
                 # x_g ~ p(x|z_prior)
                 x_g = generator(z_prior)
 
-                loss_g = get_loss_g(wass, discriminator, x, x_g, valid, attach_classifier, z_prior, z_inf)
+                loss_g = get_loss_g(wass, discriminator, x, x_g, valid, attach_inference, z_prior, z_inf)
                 record_progress(epoch, args.epochs, batch_num, len(train_loader), tracker, "train_loss_g", loss_g.item(), batch_size)
                 total_loss = loss_g
                 optimizers = [optimizer_g]
 
                 if (attach_classifier):
+                    if (attach_inference):
+                        
                     loss_c = log_reg_run_batch(batch_num, len(train_loader), x, labels, classifier, "train(+GAN)", epoch, args.epochs, tracker, optimizer_c)
                     total_loss += CLASSIFIER_LOSS_WT*loss_c
                     optimizers.append(optimizer_c)

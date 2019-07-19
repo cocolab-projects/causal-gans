@@ -107,7 +107,7 @@ class ConvDiscriminator(nn.Module):
         )
         
         dim = 2048 if train_on_mnist else 8192
-#        if (attach_inference): dim += (z_dim+40)
+        # if (attach_inference): dim += (z_dim+40)
         
         # The height and width of downsampled image
         self.adv_layer = nn.Sequential( 

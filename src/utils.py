@@ -147,7 +147,7 @@ def resample(z, post_mean, post_var, sample_from):
     batch_size = z.size(0)
     latent_dim = z.size(1)
 
-    if (sample_from == prior):
+    if (sample_from == "prior"):
         return normal_resample(z)
     elif (sample_from == "post"):
         return normal_resample(z, post_mean, post_var)
@@ -172,3 +172,8 @@ def latent_cfs(z, post_mean, post_var, sample_from = "prior"):
         cf[:,dim] = resample(z, post_mean, post_var, sample_from)
         cfs.append(latent_cf(perturbation, z))
     return cfs
+
+def thiswillbemain():
+    batch_size = 64
+    latent_dim = 40
+    z_prior = torch.randn(batch_size, latent_dim)
