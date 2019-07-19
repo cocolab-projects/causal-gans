@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 from itertools import chain
 
 import torch
-import torch.nn.functional as F         # haven't used this yet
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import torchvision.utils as utils
 from torchvision.utils import save_image
@@ -105,19 +105,27 @@ def descend(optimizers, loss):
 
 # COMPUTING LOSS FOR GAN (DISCRIMINATOR AND GENERATOR)
 
-def get_loss_d(wass, discriminator, imgs, gen_imgs, valid, fake):
+def get_loss_d(wass, discriminator, x, x_g, valid, fake, attach_inference, z_prior, z_inf):
     if (wass):
-        return -torch.mean(discriminator(imgs)) + torch.mean(discriminator(gen_imgs))
+        return -torch.mean(discriminator(x)) + torch.mean(discriminator(x_g))
+    elif (attach_inference):
+        pred_fake = discriminator(x_g, z_prior)
+        pred_real = discriminator(x, z_inf)
+        return torch.mean(F.softplus(-pred_real)) + torch.mean(F.softplus(pred_fake))
     else:
-        real_loss = discriminator.criterion(discriminator(imgs), valid)
-        fake_loss = discriminator.criterion(discriminator(gen_imgs), fake)
+        real_loss = discriminator.criterion(discriminator(x), valid)
+        fake_loss = discriminator.criterion(discriminator(x_g), fake)
         return (real_loss + fake_loss) / 2
 
-def get_loss_g(wass, discriminator, gen_imgs, valid):
+def get_loss_g(wass, discriminator, x, x_g, valid, attach_inference, z_prior, z_inf):
     if (wass):
-        return -torch.mean(discriminator(gen_imgs))
+        return -torch.mean(discriminator(x_g))
+    elif(attach_inference):
+        pred_fake = discriminator(x_g, z_prior)
+        pred_real = discriminator(x, z_inf)
+        return torch.mean(F.softplus(pred_real)) + torch.mean(-F.softplus(pred_fake))
     else:
-        return discriminator.criterion(discriminator(gen_imgs), valid)
+        return discriminator.criterion(discriminator(x_g), valid)
 
 # CLAMPING DISCRIMINATOR FOR GAN
 
@@ -284,6 +292,7 @@ if __name__ == "__main__":
         breakpoint()    # to prevent GAN from training
 
     # Option 2: GAN, with the option to attach a linear classifier
+    # TODO: wass and attach_inference can't work together; loss is computed differently
     wass = True
     attach_classifier = False
     attach_inference = False
@@ -291,7 +300,7 @@ if __name__ == "__main__":
     # setup models and optimizers
     generator = ConvGenerator(args.latent_dim, wass, train_on_mnist).to(device)
     inference_net = InferenceNet(1, 64, args.latent_dim).to(device)
-    discriminator = ConvDiscriminator(wass, train_on_mnist).to(device)
+    discriminator = ConvDiscriminator(wass, train_on_mnist, attach_inference, args.latent_dim).to(device)
     classifier = LogisticRegression(cf).to(device)
 
     generator.train()
@@ -310,8 +319,9 @@ if __name__ == "__main__":
         pbar = tqdm(total = len(train_loader))
         # train
         for batch_num, (imgs, labels) in enumerate(train_loader):
-            batch_size = imgs.size(0)
-            imgs = imgs.to(device)
+            x, labels = imgs.to(device), labels.to(device)
+            # x.shape = (64, 1, 64, 64)
+            batch_size = x.size(0)
 
             optimizer_d.zero_grad()
 
@@ -321,23 +331,23 @@ if __name__ == "__main__":
             free_params(discriminator)
 
             # adversarial ground truths
-            valid = torch.ones(imgs.size(0), 1, device=device)
-            fake = torch.zeros(imgs.size(0), 1, device=device)
+            valid = torch.ones(x.size(0), 1, device=device)
+            fake = torch.zeros(x.size(0), 1, device=device)
 
-            # z ~ N(0,1)
-            z = torch.randn(batch_size, args.latent_dim, device=device)
+            # z_prior ~ N(0,1)
+            z_prior = torch.randn(batch_size, args.latent_dim, device=device)
             
             # define q(z|x)
-            z_inf_mu, z_inf_logvar = inference_net(x.view(batch_size, 1, 64, 64)) # note: x may not be appropriate shape
+            z_inf_mu, z_inf_logvar = inference_net(x) # note: x may not be appropriate shape
 
             # z_inf ~ q(z|x)
             z_inf = reparameterize(z_inf_mu, z_inf_logvar)
 
-            # x ~ p(x | z)
-            z_g = generator(z)
+            # x ~ p(x | z_prior)
+            x_g = generator(z_prior)
 
             # train discriminator
-            loss_d = get_loss_d(wass, discriminator, z_g, gen_imgs, valid, fake)
+            loss_d = get_loss_d(wass, discriminator, x, x_g, valid, fake, attach_inference, z_prior, z_inf)
             descend([optimizer_d], loss_d)
             record_progress(epoch, args.epochs, batch_num, len(train_loader), tracker, "train_loss_d", loss_d.item(), batch_size)
 
@@ -353,15 +363,16 @@ if __name__ == "__main__":
                 free_params(classifier)
                 frozen_params(discriminator)
 
-                gen_imgs = generator(z)
+                # x_g ~ p(x|z_prior)
+                x_g = generator(z_prior)
 
-                loss_g = get_loss_g(wass, discriminator, gen_imgs, valid)
+                loss_g = get_loss_g(wass, discriminator, x, x_gen, valid, attach_classifier, z_prior, z_inf)
                 record_progress(epoch, args.epochs, batch_num, len(train_loader), tracker, "train_loss_g", loss_g.item(), batch_size)
                 total_loss = loss_g
                 optimizers = [optimizer_g]
 
                 if (attach_classifier):
-                    loss_c = log_reg_run_batch(batch_num, len(train_loader), imgs, labels, classifier, "train(+GAN)", epoch, args.epochs, tracker, optimizer_c)
+                    loss_c = log_reg_run_batch(batch_num, len(train_loader), x, labels, classifier, "train(+GAN)", epoch, args.epochs, tracker, optimizer_c)
                     total_loss += CLASSIFIER_LOSS_WT*loss_c
                     optimizers.append(optimizer_c)
                 

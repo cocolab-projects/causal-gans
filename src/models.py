@@ -36,14 +36,9 @@ class ConvGenerator(nn.Module):
         self.optimizer = torch.optim.RMSprop if wass else torch.optim.Adam
         self.n_channels = 1
 
+        # get dim of image (only supports square images)
         img_height = IMG_DIM
-        img_width = IMG_DIM
-
-        if (train_on_mnist):
-            img_height = MNIST_IMG_DIM
-            img_width = MNIST_IMG_DIM
-
-        assert img_height == img_width, "only square images supported for now"  # block non-square
+        if (train_on_mnist): img_height = MNIST_IMG_DIM
 
         self.init_size = img_height // 4
         self.l1 = nn.Sequential(
@@ -85,12 +80,13 @@ class ConvGenerator(nn.Module):
         return img
 
 class ConvDiscriminator(nn.Module):
-    def __init__(self, wass=False, train_on_mnist=False):
+    def __init__(self, wass=False, train_on_mnist=False, attach_inference=False, z_dim=0):
         super(ConvDiscriminator, self).__init__()
 
         self.optimizer = torch.optim.RMSprop if wass else torch.optim.Adam
         self.criterion = torch.nn.BCELoss()
         self.n_channels=1
+        self.attach_inference=attach_inference
         
         self.model = nn.Sequential(
             nn.Conv2d(self.n_channels, 128, 3, stride=1, padding=1),
@@ -107,9 +103,11 @@ class ConvDiscriminator(nn.Module):
             # -
             nn.Conv2d(128, 128, 4, stride=2, padding=1),
             nn.BatchNorm2d(128, momentum=0.9),
-            nn.LeakyReLU(0.1, inplace=True))
+            nn.LeakyReLU(0.1, inplace=True)
+        )
         
         dim = 2048 if train_on_mnist else 8192
+        if (attach_inference): dim += z_dim
         
         # The height and width of downsampled image
         self.adv_layer = nn.Sequential( 
@@ -118,9 +116,10 @@ class ConvDiscriminator(nn.Module):
             nn.Linear(512, 1),
             nn.Sigmoid())  # note: we apply sigmoid here
 
-    def forward(self, img):
+    def forward(self, img, z=None):
         out = self.model(img)
         out = out.view(out.shape[0], -1)
+        if (attach_inference): torch.cat((out, z), dim=1)
         validity = self.adv_layer(out)
         return validity
 
