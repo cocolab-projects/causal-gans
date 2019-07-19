@@ -9,26 +9,29 @@ TODO:
 @author mmosse19
 @version July 2019
 """
+# general
 import os
+import copy
+from itertools import chain
+import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
-import matplotlib.pyplot as plt
-from itertools import chain
 
+# torch
 import torch
+import torchvision.datasets as dset
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-import torchvision.utils as utils
-from torchvision.utils import save_image
-
 from torch.utils.data.dataset import Dataset
-import torchvision.datasets as dset
 import torchvision.transforms as transform
+from torchvision.utils import save_image
+import torchvision.utils as utils
 
+# from this dir
 from generate import mnist_dir_setup
 from datasets import (CausalMNIST)
 from models import (LogisticRegression, ConvGenerator, ConvDiscriminator, InferenceNet)
-from utils import (LossTracker, AverageMeter, save_checkpoint, free_params, frozen_params, to_percent, viewable_img, reparameterize)
+from utils import (LossTracker, AverageMeter, save_checkpoint, free_params, frozen_params, to_percent, viewable_img, reparameterize, latent_cfs)
 
 CLASSIFIER_LOSS_WT = 1.0
 SUPRESS_PRINT_STATEMENTS = True 
@@ -279,12 +282,12 @@ if __name__ == "__main__":
     cf = False
     transform = True
     using_gan = True
+    cf_inf = True
     train_on_mnist = False
 
-    # set up data loaders, loss tracker
-    
+    # set up classifier, data loaders, loss tracker
+    classifier = LogisticRegression(cf or cf_inf).to(device)
     train_loader, valid_loader, test_loader = get_causal_mnist_loaders(using_gan, cf, transform, train_on_mnist)
-    
     tracker = LossTracker()
 
     # Option 1: linear classifier alone
@@ -295,14 +298,19 @@ if __name__ == "__main__":
     # Option 2: GAN, with the option to attach a linear classifier
     # TODO: wass and attach_inference can't work together; loss is computed differently
     wass = True 
-    attach_classifier = False
+    attach_classifier = True
     attach_inference = True
+    if (wass):
+        print("using WGAN.")
+    if (attach_classifier):
+        print("attaching classifier.")
+    if (attach_inference):
+        print("using ALI.")
 
     # setup models and optimizers
     generator = ConvGenerator(args.latent_dim, wass, train_on_mnist).to(device)
     inference_net = InferenceNet(1, 64, args.latent_dim).to(device)
     discriminator = ConvDiscriminator(wass, train_on_mnist, attach_inference, args.latent_dim).to(device)
-    classifier = LogisticRegression(cf).to(device)
 
     generator.train()
     discriminator.train()
@@ -315,7 +323,7 @@ if __name__ == "__main__":
     optimizer_d = discriminator.optimizer(discriminator.parameters(), lr=args.lr_d)
     optimizer_c = torch.optim.Adam(classifier.parameters(), lr=args.lr, betas=(args.b1, args.b2))
     
-    print("set up GAN models/optimizers. now training...")
+    print("set up models/optimizers. now training...")
 
     # train (and validate, if attach_classifier)
     for epoch in range(args.epochs):
@@ -342,7 +350,7 @@ if __name__ == "__main__":
             
             # define q(z|x)
             z_inf_mu, z_inf_logvar = inference_net(x) # note: x may not be appropriate shape
-            breakpoint()
+
             # z_inf ~ q(z|x)
             z_inf = reparameterize(z_inf_mu, z_inf_logvar)
 
@@ -375,7 +383,17 @@ if __name__ == "__main__":
                 optimizers = [optimizer_g]
 
                 if (attach_classifier):
-                    loss_c = log_reg_run_batch(batch_num, len(train_loader), x, labels, classifier, "train(+GAN)", epoch, args.epochs, tracker, optimizer_c)
+                    # imgs_to_classify has shape (64, 1, 64, 64)
+                    imgs_to_classify = copy.deepcopy(x)
+                    
+                    if (cf_inf):
+                        cfs = latent_cfs(z_prior, z_inf_mu, z_inf_logvar, "prior")
+                        for i, img in enumerate(imgs_to_classify):
+                            breakpoint()
+                            cfs[i] = imgs_to_classify[0][i] + cfs[i]
+                            imgs_to_classify[i] = np.concatenate(cfs[i], axis=1)
+
+                    loss_c = log_reg_run_batch(batch_num, len(train_loader), imgs_to_classify, labels, classifier, "train(+GAN)", epoch, args.epochs, tracker, optimizer_c)
                     total_loss += CLASSIFIER_LOSS_WT*loss_c
                     optimizers.append(optimizer_c)
                 

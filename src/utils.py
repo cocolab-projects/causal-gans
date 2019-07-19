@@ -131,49 +131,54 @@ def reparameterize(mu, logvar):
     eps = torch.randn_like(std)
     return eps.mul(std).add(mu)
 
-def nearby(sample, z):
-    return z - EPSILON <= sample and sample <= z + EPSILON
+def nearby(sample, img_prior_along_dim):
+    return img_prior_along_dim - EPSILON <= sample and sample <= img_prior_along_dim + EPSILON
 
 # resamples from given dist until it finds something that
 # isn't close to z
-def normal_resample(z, mean=0, var=1):
-    cf = np.random.normal(mean, var, batch_size)
-    for img in batch_size:
-        while (nearby(cf[img], z)):
-            cf[img] = np.random.normal(0, 1, 1)
-    return cf
+def normal_resample(img_prior_along_dim, mean=0, std_dev=1):
+    sample = np.random.normal(mean, std_dev)
+    while (nearby(sample, img_prior_along_dim)):
+        sample = np.random.normal(mean, std_dev)
 
-def resample(z, post_mean, post_var, sample_from):
-    batch_size = z.size(0)
-    latent_dim = z.size(1)
+    return sample
 
+def resample(img_prior_along_dim, post_mean, post_std_dev, sample_from):
     if (sample_from == "prior"):
-        return normal_resample(z)
+        return normal_resample(img_prior_along_dim)
     elif (sample_from == "post"):
-        return normal_resample(z, post_mean, post_var)
+        return normal_resample(img_prior_along_dim, post_mean, post_std_dev)
     elif (sample_from == "mix"):
-        if (np.random.binomial(z, 1, PRIOR_WEIGHT)):
-            return normal_resample(z)
+        if (np.random.binomial(1, PRIOR_WEIGHT)):
+            return normal_resample(img_prior_along_dim)
         else:
-            return normal_resample(z, post_mean, post_var)
+            return normal_resample(img_prior_along_dim, post_mean, post_std_dev)
 
-def latent_cfs(z, post_mean, post_var, sample_from = "prior"):
-    assert( sample_from == "prior" or
-            sample_from == "posterior" or
-            sample_from == "mix")
-
+def latent_cfs(z, post_mean, post_logvar, sample_from):
     batch_size = z.size(0)
     latent_dim = z.size(1)
+    post_std_dev = torch.exp(0.5*post_logvar)
 
-    cfs = []
+    batch_cfs = []
+    for img in range(batch_size):
+        img_cfs = []
+        img_prior = z[img]
 
-    for dim in range(latent_dim):
-        cf = z.copy() # or .clone()
-        cf[:,dim] = resample(z, post_mean, post_var, sample_from)
-        cfs.append(latent_cf(perturbation, z))
-    return cfs
+        for dim in range(latent_dim):
+            cf = copy.deepcopy(img_prior) # or .clone()
+            cf[dim] = resample(img_prior[dim], post_mean[img][dim], post_std_dev[img][dim], sample_from)
+            img_cfs.append(cf)
 
-def thiswillbemain():
-    batch_size = 64
-    latent_dim = 40
+        batch_cfs.append(img_cfs)
+    breakpoint()
+    return torch.FloatTensor(batch_cfs)
+
+if __name__ == "__main__":
+    batch_size = 2
+    latent_dim = 4
     z_prior = torch.randn(batch_size, latent_dim)
+    print(z_prior)
+    mu = torch.FloatTensor([[ 3.0, 3.0, 3.0, 3.0], [ 3.0, 3.0, 3.0, 3.0]])
+    log_var = torch.FloatTensor([[0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]])
+    cfs = latent_cfs(z_prior, mu, log_var, "post")
+    print(cfs)
