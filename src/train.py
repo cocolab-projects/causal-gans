@@ -61,7 +61,7 @@ def handle_args():
                         help="adam: decay of first order momentum of gradient")
 
     # for GANs
-    parser.add_argument("--latent_dim", type=int, default=40,
+    parser.add_argument("--latent_dim", type=int, default=4,
                         help="dimensionality of the latent space")
     parser.add_argument("--sample_interval", type=int, default=500,
                         help="interval betwen image samples")
@@ -104,24 +104,24 @@ def descend(optimizers, loss):
 # COMPUTING LOSS FOR GAN (DISCRIMINATOR AND GENERATOR)
 
 def get_loss_d(wass, discriminator, x, x_g, valid, fake, attach_inference, z_prior, z_inf):
-    if (wass):
-        return -torch.mean(discriminator(x)) + torch.mean(discriminator(x_g))
-    elif (attach_inference):
+    if (attach_inference):
         pred_fake = discriminator(x_g, z_prior)
         pred_real = discriminator(x, z_inf)
         return torch.mean(F.softplus(-pred_real)) + torch.mean(F.softplus(pred_fake))
+    elif (wass):
+        return -torch.mean(discriminator(x)) + torch.mean(discriminator(x_g))
     else:
         real_loss = discriminator.criterion(discriminator(x), valid)
         fake_loss = discriminator.criterion(discriminator(x_g), fake)
         return (real_loss + fake_loss) / 2
 
 def get_loss_g(wass, discriminator, x, x_g, valid, attach_inference, z_prior, z_inf):
-    if (wass):
-        return -torch.mean(discriminator(x_g))
-    elif(attach_inference):
+    if (attach_inference):
         pred_fake = discriminator(x_g, z_prior)
         pred_real = discriminator(x, z_inf)
         return torch.mean(F.softplus(pred_real)) + torch.mean(-F.softplus(pred_fake))
+    elif (wass):
+        return -torch.mean(discriminator(x_g))
     else:
         print("wass and attach_inference are both false")
         return discriminator.criterion(discriminator(x_g), valid)
@@ -247,6 +247,8 @@ def get_causal_mnist_loaders(using_gan, cf, transform, train_on_mnist):
     train_loader = DataLoader(train, shuffle=True, batch_size=args.batch_size)
     valid_loader = DataLoader(valid, shuffle=True, batch_size=args.batch_size)
     test_loader = DataLoader(test, shuffle=True, batch_size=args.batch_size)
+    
+    print("filled data loaders.")
 
     return train_loader, valid_loader, test_loader
 
@@ -292,7 +294,7 @@ if __name__ == "__main__":
 
     # Option 2: GAN, with the option to attach a linear classifier
     # TODO: wass and attach_inference can't work together; loss is computed differently
-    wass = False
+    wass = True 
     attach_classifier = False
     attach_inference = True
 
@@ -312,6 +314,8 @@ if __name__ == "__main__":
                                             lr=args.lr)
     optimizer_d = discriminator.optimizer(discriminator.parameters(), lr=args.lr_d)
     optimizer_c = torch.optim.Adam(classifier.parameters(), lr=args.lr, betas=(args.b1, args.b2))
+    
+    print("set up GAN models/optimizers. now training...")
 
     # train (and validate, if attach_classifier)
     for epoch in range(args.epochs):
@@ -338,7 +342,7 @@ if __name__ == "__main__":
             
             # define q(z|x)
             z_inf_mu, z_inf_logvar = inference_net(x) # note: x may not be appropriate shape
-
+            breakpoint()
             # z_inf ~ q(z|x)
             z_inf = reparameterize(z_inf_mu, z_inf_logvar)
 
@@ -371,8 +375,6 @@ if __name__ == "__main__":
                 optimizers = [optimizer_g]
 
                 if (attach_classifier):
-                    if (attach_inference):
-                        
                     loss_c = log_reg_run_batch(batch_num, len(train_loader), x, labels, classifier, "train(+GAN)", epoch, args.epochs, tracker, optimizer_c)
                     total_loss += CLASSIFIER_LOSS_WT*loss_c
                     optimizers.append(optimizer_c)
