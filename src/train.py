@@ -51,7 +51,7 @@ def handle_args():
                         help='learning rate [default: 2e-4]')
     parser.add_argument('--lr_d', type=float, default=1e-5,
                         help='discriminator learning rate [default: 1e-5]')
-    parser.add_argument('--epochs', type=int, default=51,
+    parser.add_argument('--epochs', type=int, default=1,
                         help='number of training epochs [default: 101]')
     parser.add_argument('--cuda', action='store_true',
                         help='Enable cuda')
@@ -78,11 +78,7 @@ def handle_args():
 
 def load_checkpoint(folder='./', filename='model_best.pth.tar'):
     checkpoint = torch.load(folder + filename)
-    epoch = checkpoint['epoch']
-    tracker = checkpoint['tracker']
-    classifier = checkpoint['classifier']
-    GAN = checkpoint['GAN']
-    return epoch, tracker, classifier, GAN
+    return checkpoint['epoch'], checkpoint['classifier_state'], checkpoint['generator_state'], checkpoint['inference_net_state'], checkpoint['tracker'], checkpoint['cached_args']
 
 def record_progress(epoch, epochs, batch_num, num_batches, tracker, kind, amt, batch_size):
     # update tracker
@@ -223,7 +219,7 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, optimizer = N
             'epoch': epoch,
             'classifier_state': model.state_dict(),
             'generator_state': generator_state,
-            'inference_net' : inference_net_state,
+            'inference_net_state': inference_net_state,
             'tracker': tracker,
             'cached_args': args,
         }, tracker.best_loss == avg_loss, folder = args.out_dir)
