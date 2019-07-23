@@ -31,7 +31,7 @@ from models import (LogisticRegression, ConvGenerator, ConvDiscriminator, Infere
 from utils import (LossTracker, AverageMeter, save_checkpoint, free_params, frozen_params, to_percent, viewable_img, reparameterize, latent_cfs)
 
 CLASSIFIER_LOSS_WT = 1.0
-SUPRESS_PRINT_STATEMENTS = True 
+SUPRESS_PRINT_STATEMENTS = True
 
 # ARGUMENTS; CHECKPOINTS AND PROGRESS WHILE TRAINING
 
@@ -51,8 +51,8 @@ def handle_args():
                         help='learning rate [default: 2e-4]')
     parser.add_argument('--lr_d', type=float, default=1e-5,
                         help='discriminator learning rate [default: 1e-5]')
-    parser.add_argument('--epochs', type=int, default=101,
-                        help='number of training epochs [default: 51]')
+    parser.add_argument('--epochs', type=int, default=51,
+                        help='number of training epochs [default: 101]')
     parser.add_argument('--cuda', action='store_true',
                         help='Enable cuda')
     parser.add_argument("--b1", type=float, default=0.9,
@@ -85,7 +85,7 @@ def record_progress(epoch, epochs, batch_num, num_batches, tracker, kind, amt, b
 
     # print avg for current epoch
     loss = tracker[kind][epoch].avg
-    progress = "[epoch {}/{}]\t[batch {}/{}]\t[{} (epoch running avg):\t\t{}]".format(epoch+1, epochs, batch_num+1, num_batches, kind, loss)
+    progress = "[epoch {}/{}]\t[batch {}/{}]\t[{} (epoch running avg):\t\t\t{}]".format(epoch+1, epochs, batch_num+1, num_batches, kind, loss)
     
     if (batch_num % 30 == 0) and not SUPRESS_PRINT_STATEMENTS: print(progress)
 
@@ -184,7 +184,6 @@ def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, optimiz
         x_to_classify = x
 
         if (generator and inference_net and sample_from):
-            breakpoint()
             # define q(z|x)
             z_inf_mu, z_inf_logvar = inference_net(x)
 
@@ -244,7 +243,7 @@ def run_log_reg(train_loader, valid_loader, test_loader, args, cf, tracker):
 
 # test log reg
 def test_log_reg_from_checkpoint(test_loader, tracker, args, cf, generator, inference_net, sample_from):
-    test_model = LogisticRegression(cf)
+    test_model = LogisticRegression(cf).to(device)
     _,_,classifier,GAN = load_checkpoint(folder=args.out_dir)
     test_model.load_state_dict(classifier)
     log_reg_run_epoch(test_loader, test_model, "test", 0, 0, tracker, generator=generator, inference_net=inference_net, sample_from=sample_from)
@@ -433,7 +432,7 @@ if __name__ == "__main__":
             pbar.update()
         pbar.close()
         # finished training for epoch; print train loss, output images
-        print('====> total train loss \t(epoch {}):\t {:.4f}'.format(epoch+1, tracker["train_loss_total"][epoch].avg))
+        print('====> total train loss\t\t\t(epoch {}):\t {:.4f}'.format(epoch+1, tracker["train_loss_total"][epoch].avg))
         save_images_from_g(generator, epoch+1, wass, args.latent_dim, args.batch_size)
         
         # validate (if attach_classifier); this saves a checkpoint if the loss was especially good
@@ -443,3 +442,5 @@ if __name__ == "__main__":
     # test
     if (attach_classifier):
         test_log_reg_from_checkpoint(test_loader, tracker, args, cf or cf_inf, generator, inference_net, sample_from)
+
+breakpoint()
