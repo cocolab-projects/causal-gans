@@ -69,6 +69,11 @@ def handle_args():
                         help="lower and upper clip value for disc. weights")
     parser.add_argument("--n_critic", type=int, default=5,
                         help="number of training steps for discriminator per iter")
+    parser.add_argument("--wass", type=bool, default=True,
+                        help="use WGAN instead of GAN")
+    parser.add_argument("--train_on_mnist", type=bool, default=False,
+                        help="train on MNIST instead of CMNIST")
+
     return parser.parse_args()
 
 def load_checkpoint(folder='./', filename='model_best.pth.tar'):
@@ -203,6 +208,7 @@ def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, optimiz
 def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, optimizer = None, generator=None, inference_net=None, sample_from=None):
     # get generator state
     generator_state = generator.state_dict() if generator else None
+    inference_net_state = inference_net.state_dict() if inference_net else None
 
     # run all batches
     log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, optimizer, generator, inference_net, sample_from)
@@ -216,10 +222,10 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, optimizer = N
         save_checkpoint({
             'epoch': epoch,
             'classifier': model.state_dict(),
-            'GAN': generator_state,
+            'generator': generator_state,
+            'inference_net' : inference_net_state,
             'tracker': tracker,
             'cmd_line_args': args,
-            'seed': args.seed
         }, tracker.best_loss == avg_loss, folder = args.out_dir)
 
     # report loss
@@ -233,19 +239,27 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, optimizer = N
 # train/test/validate log reg
 def run_log_reg(train_loader, valid_loader, test_loader, args, cf, tracker):
     model = LogisticRegression(cf).to(device)
+
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(args.b1, args.b2))
 
     for epoch in range(int(args.epochs)):
         log_reg_run_epoch(train_loader, model, "train", epoch, args.epochs, tracker, optimizer)
         log_reg_run_epoch(valid_loader, model, "validate", epoch, args.epochs, tracker)
 
-    test_log_reg_from_checkpoint(test_loader, tracker, args, cf)
+    test_log_reg_from_checkpoint(test_loader, tracker, args, cf, None)
 
 # test log reg
-def test_log_reg_from_checkpoint(test_loader, tracker, args, cf, generator, inference_net, sample_from):
+def test_log_reg_from_checkpoint(test_loader, tracker, out_dir, cf, sample_from):
+    epoch, classifier_state, generator_state, inference_net_state, tracker, cached_args = load_checkpoint(folder=out_dir)
+
     test_model = LogisticRegression(cf).to(device)
-    _,_,classifier,GAN = load_checkpoint(folder=args.out_dir)
-    test_model.load_state_dict(classifier)
+    generator = ConvGenerator(cached_args.latent_dim, cached_args.wass, cached_args.train_on_mnist).to(device)
+    inference_net = InferenceNet(1, 64, cached_args.latent_dim).to(device)
+
+    test_model.load_state_dict(classifier_state)
+    if (generator_state): generator.load_state_dict(generator_state)
+    if (inference_net_state): inference_net.load_state_dict(inference_net_state)
+
     log_reg_run_epoch(test_loader, test_model, "test", 0, 0, tracker, generator=generator, inference_net=inference_net, sample_from=sample_from)
 
 def get_causal_mnist_dataset(mode, cf, transform, mnist):
@@ -301,6 +315,8 @@ def combine_x_cf(x, z_inf, z_inf_mu, z_inf_sigma, sample_from, generator):
 
     return torch.stack(x_to_classify)
 
+# MAIN
+
 if __name__ == "__main__":
     # external args
     args = handle_args()
@@ -313,14 +329,13 @@ if __name__ == "__main__":
     cf = False
     transform = True
     using_gan = True
-    train_on_mnist = False
         # train with inferred counterfactuals
     cf_inf = True
     sample_from = "mix"
 
     # set up classifier, data loaders, loss tracker
     classifier = LogisticRegression(cf or cf_inf).to(device)
-    train_loader, valid_loader, test_loader = get_causal_mnist_loaders(using_gan, cf, transform, train_on_mnist)
+    train_loader, valid_loader, test_loader = get_causal_mnist_loaders(using_gan, cf, transform, args.train_on_mnist)
     tracker = LossTracker()
 
     # Option 1: linear classifier alone
@@ -330,10 +345,9 @@ if __name__ == "__main__":
 
     # Option 2: GAN, with the option to attach a linear classifier
     # TODO: wass and attach_inference can't work together; loss is computed differently
-    wass = True 
     attach_classifier = True
     attach_inference = True
-    if (wass):
+    if (args.wass):
         print("using WGAN.")
     if (attach_classifier):
         print("attaching classifier.")
@@ -341,9 +355,9 @@ if __name__ == "__main__":
         print("using ALI.")
 
     # setup models and optimizers
-    generator = ConvGenerator(args.latent_dim, wass, train_on_mnist).to(device)
+    generator = ConvGenerator(args.latent_dim, args.wass, args.train_on_mnist).to(device)
     inference_net = InferenceNet(1, 64, args.latent_dim).to(device)
-    discriminator = ConvDiscriminator(wass, train_on_mnist, attach_inference, args.latent_dim).to(device)
+    discriminator = ConvDiscriminator(args.wass, args.train_on_mnist, attach_inference, args.latent_dim).to(device)
 
     generator.train()
     discriminator.train()
@@ -391,15 +405,15 @@ if __name__ == "__main__":
             x_g = generator(z_prior)
 
             # train discriminator
-            loss_d = get_loss_d(wass, discriminator, x, x_g, valid, fake, attach_inference, z_prior, z_inf)
+            loss_d = get_loss_d(args.wass, discriminator, x, x_g, valid, fake, attach_inference, z_prior, z_inf)
             descend([optimizer_d], loss_d)
             record_progress(epoch, args.epochs, batch_num, len(train_loader), tracker, "train_loss_d", loss_d.item(), batch_size)
 
             # clip discriminator if wass
-            if (wass): clip_discriminator(discriminator)
+            if (args.wass): clip_discriminator(discriminator)
 
             # train generator (and classifier if necessary); execute unconditionally if GAN and periodically if WGAN
-            if not wass or batch_num % args.n_critic == 0:
+            if not args.wass or batch_num % args.n_critic == 0:
                 optimizer_g.zero_grad()
 
                 free_params(generator)
@@ -410,7 +424,7 @@ if __name__ == "__main__":
                 # x_g ~ p(x|z_prior)
                 x_g = generator(z_prior)
 
-                loss_g = get_loss_g(wass, discriminator, x, x_g, valid, attach_inference, z_prior, z_inf)
+                loss_g = get_loss_g(args.wass, discriminator, x, x_g, valid, attach_inference, z_prior, z_inf)
                 record_progress(epoch, args.epochs, batch_num, len(train_loader), tracker, "train_loss_g", loss_g.item(), batch_size)
                 total_loss = loss_g
                 optimizers = [optimizer_g]
@@ -433,14 +447,14 @@ if __name__ == "__main__":
         pbar.close()
         # finished training for epoch; print train loss, output images
         print('====> total train loss\t\t\t(epoch {}):\t {:.4f}'.format(epoch+1, tracker["train_loss_total"][epoch].avg))
-        save_images_from_g(generator, epoch+1, wass, args.latent_dim, args.batch_size)
+        save_images_from_g(generator, epoch+1, args.wass, args.latent_dim, args.batch_size)
         
         # validate (if attach_classifier); this saves a checkpoint if the loss was especially good
         if (attach_classifier):
-            log_reg_run_epoch(valid_loader, classifier, "validate", epoch, args.epochs, tracker, generator=generator, inference_net=inference_net, sample_from=sample_from)
+            log_reg_run_epoch(valid_loader, classifier, "validate", epoch, args.out_dir, tracker, generator=generator, inference_net=inference_net, sample_from=sample_from)
 
     # test
     if (attach_classifier):
-        test_log_reg_from_checkpoint(test_loader, tracker, args, cf or cf_inf, generator, inference_net, sample_from)
+        test_log_reg_from_checkpoint(test_loader, tracker, args, cf or cf_inf, sample_from)
 
 breakpoint()
