@@ -3,9 +3,6 @@ train.py
 
 Much credit for GAN training goes to eriklindernoren, mhw32
 
-TODO:
-        (3) add generated cfs
-
 @author mmosse19
 @version July 2019
 """
@@ -183,9 +180,11 @@ def log_reg_run_batch(batch_num, num_batches, imgs, labels, model, mode, epoch, 
 
 def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, optimizer, generator, inference_net, sample_from):
     for batch_num, (x, labels) in enumerate(loader):
+        x, labels = x.to(device), labels.to(device)
         x_to_classify = x
 
         if (generator and inference_net and sample_from):
+            breakpoint()
             # define q(z|x)
             z_inf_mu, z_inf_logvar = inference_net(x)
 
@@ -196,10 +195,10 @@ def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, optimiz
             x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), sample_from, generator)
 
         if (mode == "train"):
-            log_reg_run_batch(batch_num, len(loader), x, labels, model, mode, epoch, epochs, tracker, optimizer)
+            log_reg_run_batch(batch_num, len(loader), x_to_classify, labels, model, mode, epoch, epochs, tracker, optimizer)
         else:
             with torch.no_grad():
-                log_reg_run_batch(batch_num, len(loader), x, labels, model, mode, epoch, epochs, tracker)
+                log_reg_run_batch(batch_num, len(loader), x_to_classify, labels, model, mode, epoch, epochs, tracker)
 
 # model is log reg model
 def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, optimizer = None, generator=None, inference_net=None, sample_from=None):
@@ -248,7 +247,7 @@ def test_log_reg_from_checkpoint(test_loader, tracker, args, cf, generator, infe
     test_model = LogisticRegression(cf)
     _,_,classifier,GAN = load_checkpoint(folder=args.out_dir)
     test_model.load_state_dict(classifier)
-    log_reg_run_epoch(test_loader, test_model, "test", 0, 0, tracker, generator, inference_net, sample_from)
+    log_reg_run_epoch(test_loader, test_model, "test", 0, 0, tracker, generator=generator, inference_net=inference_net, sample_from=sample_from)
 
 def get_causal_mnist_dataset(mode, cf, transform, mnist):
     data = CausalMNIST(split=mode, mnist=mnist, cf=cf, transform=transform)
@@ -286,7 +285,6 @@ def save_images_from_g(generator, epoch, wass, latent_dim, batch_size):
             save_image(gen_imgs.data[:n_images], title, nrow=n_imgs_per_row, normalize=True)
 
 def combine_x_cf(x, z_inf, z_inf_mu, z_inf_sigma, sample_from, generator):
-    breakpoint()
     latent_dim = z_inf.size(1)
     x_to_classify = [[img.squeeze()] for img in x]
     for dim in range(latent_dim):
@@ -419,7 +417,6 @@ if __name__ == "__main__":
                 optimizers = [optimizer_g]
 
                 if (attach_classifier):
-                    # x has shape (64, 1, 64, 64)
                     x_to_classify = x
                     
                     if (cf_inf):
@@ -441,7 +438,7 @@ if __name__ == "__main__":
         
         # validate (if attach_classifier); this saves a checkpoint if the loss was especially good
         if (attach_classifier):
-            validate_loss = log_reg_run_epoch(valid_loader, classifier, "validate", epoch, args.epochs, tracker, generator, inference_net, sample_from)
+            log_reg_run_epoch(valid_loader, classifier, "validate", epoch, args.epochs, tracker, generator=generator, inference_net=inference_net, sample_from=sample_from)
 
     # test
     if (attach_classifier):
