@@ -221,11 +221,11 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, optimizer = N
                 
         save_checkpoint({
             'epoch': epoch,
-            'classifier': model.state_dict(),
-            'generator': generator_state,
+            'classifier_state': model.state_dict(),
+            'generator_state': generator_state,
             'inference_net' : inference_net_state,
             'tracker': tracker,
-            'cmd_line_args': args,
+            'cached_args': args,
         }, tracker.best_loss == avg_loss, folder = args.out_dir)
 
     # report loss
@@ -243,10 +243,10 @@ def run_log_reg(train_loader, valid_loader, test_loader, args, cf, tracker):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(args.b1, args.b2))
 
     for epoch in range(int(args.epochs)):
-        log_reg_run_epoch(train_loader, model, "train", epoch, args.epochs, tracker, optimizer)
+        log_reg_run_epoch(train_loader, model, "train", epoch, args.epochs, tracker, optimizer=optimizer)
         log_reg_run_epoch(valid_loader, model, "validate", epoch, args.epochs, tracker)
 
-    test_log_reg_from_checkpoint(test_loader, tracker, args, cf, None)
+    test_log_reg_from_checkpoint(test_loader, tracker, args.out_dir, cf, None)
 
 # test log reg
 def test_log_reg_from_checkpoint(test_loader, tracker, out_dir, cf, sample_from):
@@ -344,7 +344,6 @@ if __name__ == "__main__":
         breakpoint()    # to prevent GAN from training
 
     # Option 2: GAN, with the option to attach a linear classifier
-    # TODO: wass and attach_inference can't work together; loss is computed differently
     attach_classifier = True
     attach_inference = True
     if (args.wass):
@@ -451,10 +450,10 @@ if __name__ == "__main__":
         
         # validate (if attach_classifier); this saves a checkpoint if the loss was especially good
         if (attach_classifier):
-            log_reg_run_epoch(valid_loader, classifier, "validate", epoch, args.out_dir, tracker, generator=generator, inference_net=inference_net, sample_from=sample_from)
+            log_reg_run_epoch(valid_loader, classifier, "validate", epoch, args.epochs, tracker, generator=generator, inference_net=inference_net, sample_from=sample_from)
 
     # test
     if (attach_classifier):
-        test_log_reg_from_checkpoint(test_loader, tracker, args, cf or cf_inf, sample_from)
+        test_log_reg_from_checkpoint(test_loader, tracker, args.out_dir, cf or cf_inf, sample_from)
 
 breakpoint()
