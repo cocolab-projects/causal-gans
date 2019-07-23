@@ -131,54 +131,81 @@ def reparameterize(mu, logvar):
     eps = torch.randn_like(std)
     return eps.mul(std).add(mu)
 
-def nearby(sample, img_prior_along_dim):
-    return img_prior_along_dim - EPSILON <= sample and sample <= img_prior_along_dim + EPSILON
+def nearby(sample, z):
+    return z.item() - EPSILON <= sample and sample <= z.item() + EPSILON
 
 # resamples from given dist until it finds something that
 # isn't close to z
-def normal_resample(img_prior_along_dim, mean=0, std_dev=1):
-    sample = np.random.normal(mean, std_dev)
-    while (nearby(sample, img_prior_along_dim)):
-        sample = np.random.normal(mean, std_dev)
+def normal_resample(z, mu=0, sigma=1):
+    sample = (torch.randn(1).item())*sigma + mu
+    while (nearby(sample, z)):
+        sample = torch.randn(1)*sigma + mu
 
     return sample
 
-def resample(img_prior_along_dim, post_mean, post_std_dev, sample_from):
-    if (sample_from == "prior"):
-        return normal_resample(img_prior_along_dim)
-    elif (sample_from == "post"):
-        return normal_resample(img_prior_along_dim, post_mean, post_std_dev)
-    elif (sample_from == "mix"):
-        if (np.random.binomial(1, PRIOR_WEIGHT)):
-            return normal_resample(img_prior_along_dim)
-        else:
-            return normal_resample(img_prior_along_dim, post_mean, post_std_dev)
+def mix_resample(z, mu, sigma):
+    if (np.random.binomial(1, PRIOR_WEIGHT)):
+        return normal_resample(z)
+    else:
+        return normal_resample(z, mu, sigma)
 
-def latent_cfs(z, post_mean, post_logvar, sample_from):
+def latent_cfs(dim, z, mu, sigma, sample_from):
     batch_size = z.size(0)
-    latent_dim = z.size(1)
+    z_col, mu, sigma = z[:,dim], mu[:,dim], sigma[:,dim]
+
+    if (sample_from== "prior"):
+        cfs = [normal_resample(z_col[i]) for i in range(batch_size)]
+    elif (sample_from == "post"):
+        cfs = [normal_resample(z_col[i], mu[i], sigma[i]) for i in range(batch_size)]
+    elif (sample_from == "mix"):
+        cfs = [mix_resample(z_col[i], mu[i], sigma[i]) for i in range(batch_size)]
+    else:
+        raise RuntimeError("latent_cfs was expecting 'prior', 'post', or 'mix'.")
+    
+    cfs = torch.FloatTensor(cfs)
+    z_cf = copy.deepcopy(z)
+
+    z_cf[:, dim] = cfs
+
+    return z_cf
+
+"""
+def latent_cfs(generator, x_act, z_inf, post_mean, post_logvar, sample_from):
+    generator.train()
+    batch_size = z_inf.size(0)
+    latent_dim = z_inf.size(1)
     post_std_dev = torch.exp(0.5*post_logvar)
 
-    batch_cfs = []
-    for img in range(batch_size):
-        img_cfs = []
-        img_prior = z[img]
+    batch_img_w_cfs = []
+    for img_loc in range(batch_size):
+        imgs_of_worlds = [x_act[img_loc]]
+        z_inf_img = z_inf[img_loc]
 
         for dim in range(latent_dim):
-            cf = copy.deepcopy(img_prior) # or .clone()
-            cf[dim] = resample(img_prior[dim], post_mean[img][dim], post_std_dev[img][dim], sample_from)
-            img_cfs.append(cf)
+            cf = copy.deepcopy(z_inf_img) # or .clone()
+            cf[dim] = resample(z_inf_img[dim], post_mean[img_loc][dim], post_std_dev[img_loc][dim], sample_from)
+            imgs_of_worlds.append(generator(cf))
 
-        batch_cfs.append(img_cfs)
-    breakpoint()
+        img_w_cfs = np.concatenate(tuple(imgs_of_worlds), axis=1)
+
+        batch_img_w_cfs.append(img_w_cfs)
+
+
+
     return torch.FloatTensor(batch_cfs)
+"""
 
 if __name__ == "__main__":
+    torch.manual_seed(42)
+    np.random.seed(42)
     batch_size = 2
-    latent_dim = 4
-    z_prior = torch.randn(batch_size, latent_dim)
-    print(z_prior)
-    mu = torch.FloatTensor([[ 3.0, 3.0, 3.0, 3.0], [ 3.0, 3.0, 3.0, 3.0]])
-    log_var = torch.FloatTensor([[0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]])
-    cfs = latent_cfs(z_prior, mu, log_var, "post")
+    latent_dims = 4
+
+    z_inf = torch.randn(batch_size, latent_dims)
+    print(z_inf)
+    mu = torch.FloatTensor([[ 3.0]*latent_dims]*batch_size)
+    stddev = torch.FloatTensor([[.10]*latent_dims] *batch_size)
+
+    dim_to_vary = 1
+    cfs = latent_cfs(dim_to_vary, z_inf, mu, stddev, "mix")
     print(cfs)
