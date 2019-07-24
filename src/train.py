@@ -329,7 +329,7 @@ if __name__ == "__main__":
     # internal args
     cf = False
     transform = True
-    using_gan = False
+    using_gan = True
         # train with inferred counterfactuals
     cf_inf = False
     sample_from = None
@@ -346,7 +346,7 @@ if __name__ == "__main__":
         breakpoint()    # to prevent GAN from training
 
     # Option 2: GAN, with the option to attach a linear classifier
-    attach_classifier = False
+    attach_classifier = True
     attach_inference = True
     if (args.wass):
         print("using WGAN.")
