@@ -163,7 +163,7 @@ def latent_cfs(dim, z, mu, sigma, sample_from):
         raise RuntimeError("latent_cfs was expecting 'prior', 'post', or 'mix'.")
     
     cfs = torch.FloatTensor(cfs)
-    z_cf = copy.deepcopy(z)
+    z_cf = z.clone()
 
     z_cf[:, dim] = cfs
 

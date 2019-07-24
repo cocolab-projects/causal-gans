@@ -3,6 +3,9 @@ train.py
 
 Much credit for GAN training goes to eriklindernoren, mhw32
 
+TODO:   (1) save imgs for sanity check: infer latent and use gan (after extensive training)
+        (2) save imgs for cfs
+
 @author mmosse19
 @version July 2019
 """
@@ -51,7 +54,7 @@ def handle_args():
                         help='learning rate [default: 2e-4]')
     parser.add_argument('--lr_d', type=float, default=1e-5,
                         help='discriminator learning rate [default: 1e-5]')
-    parser.add_argument('--epochs', type=int, default=1,
+    parser.add_argument('--epochs', type=int, default=51,
                         help='number of training epochs [default: 101]')
     parser.add_argument('--cuda', action='store_true',
                         help='Enable cuda')
@@ -148,8 +151,8 @@ def log_reg_run_batch(batch_num, num_batches, imgs, labels, model, mode, epoch, 
 
     # if testing for accuracy, round outputs; else add dim to labels
     if (mode == "test"):
-        outputs = np.rint(outputs.numpy().flatten())
-        labels = labels.numpy()
+        outputs = np.rint(outputs.cpu().numpy().flatten())
+        labels = labels.cpu().numpy()
     else:
         labels = labels.unsqueeze(1)
 
@@ -324,9 +327,9 @@ if __name__ == "__main__":
     # internal args
     cf = False
     transform = True
-    using_gan = True
+    using_gan = False
         # train with inferred counterfactuals
-    cf_inf = True
+    cf_inf = False
     sample_from = "mix"
 
     # set up classifier, data loaders, loss tracker
@@ -443,7 +446,12 @@ if __name__ == "__main__":
         # finished training for epoch; print train loss, output images
         print('====> total train loss\t\t\t(epoch {}):\t {:.4f}'.format(epoch+1, tracker["train_loss_total"][epoch].avg))
         save_images_from_g(generator, epoch+1, args.wass, args.latent_dim, args.batch_size)
-        
+        frozen_params(generator)
+        frozen_params(inference_net)
+        frozen_params(classifier)
+        frozen_params(discriminator)
+
+
         # validate (if attach_classifier); this saves a checkpoint if the loss was especially good
         if (attach_classifier):
             log_reg_run_epoch(valid_loader, classifier, "validate", epoch, args.epochs, tracker, generator=generator, inference_net=inference_net, sample_from=sample_from)
