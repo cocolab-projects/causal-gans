@@ -3,7 +3,8 @@ train.py
 
 Much credit for GAN training goes to eriklindernoren, mhw32
 
-TODO:   (1) save imgs for sanity check: infer latent and use gan (after extensive training)
+TODO:   
+        (1) save imgs for sanity check: infer latent and use gan (after extensive training)
         (2) save imgs for cfs
 
 @author mmosse19
@@ -33,8 +34,9 @@ from datasets import (CausalMNIST)
 from models import (LogisticRegression, ConvGenerator, ConvDiscriminator, InferenceNet)
 from utils import (LossTracker, AverageMeter, save_checkpoint, free_params, frozen_params, to_percent, viewable_img, reparameterize, latent_cfs)
 
-CLASSIFIER_LOSS_WT = 1.0
-SUPRESS_PRINT_STATEMENTS = True
+GRADUAL_CLASS_WT = True
+CLASSIFIER_LOSS_WT = 0.0 if GRADUAL_CLASS_WT else 1.0
+SUPRESS_PRINT_STATEMENTS = False
 
 # ARGUMENTS; CHECKPOINTS AND PROGRESS WHILE TRAINING
 
@@ -89,7 +91,7 @@ def record_progress(epoch, epochs, batch_num, num_batches, tracker, kind, amt, b
 
     # print avg for current epoch
     loss = tracker[kind][epoch].avg
-    progress = "[epoch {}/{}]\t[batch {}/{}]\t[{} (epoch running avg):\t\t\t{}]".format(epoch+1, epochs, batch_num+1, num_batches, kind, loss)
+    progress = "[epoch {}/{}]\t[batch {}/{}]\t[{} (epoch running avg):\t\t\t\t{}]".format(epoch+1, epochs, batch_num+1, num_batches, kind, loss)
     
     if (batch_num % 30 == 0) and not SUPRESS_PRINT_STATEMENTS: print(progress)
 
@@ -228,7 +230,7 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, optimizer = N
         }, tracker.best_loss == avg_loss, folder = args.out_dir)
 
     # report loss
-    if epoch % 10 == 0:
+    if epoch % 10 == 0 or mode == "test":
         print('====> {} loss for log reg \t(epoch {}):\t {:.4f}'.format(mode, epoch+1, avg_loss))
     if (mode=="test"):
         avg_causal_loss = tracker[mode + "_causal_accuracy"][epoch].avg
@@ -330,7 +332,8 @@ if __name__ == "__main__":
     using_gan = False
         # train with inferred counterfactuals
     cf_inf = False
-    sample_from = "mix"
+    sample_from = None
+    if (cf_inf): sample_from = "mix"
 
     # set up classifier, data loaders, loss tracker
     classifier = LogisticRegression(cf or cf_inf).to(device)
@@ -343,7 +346,7 @@ if __name__ == "__main__":
         breakpoint()    # to prevent GAN from training
 
     # Option 2: GAN, with the option to attach a linear classifier
-    attach_classifier = True
+    attach_classifier = False
     attach_inference = True
     if (args.wass):
         print("using WGAN.")
@@ -436,6 +439,7 @@ if __name__ == "__main__":
 
                     loss_c = log_reg_run_batch(batch_num, len(train_loader), x_to_classify, labels, classifier, "train(+GAN)", epoch, args.epochs, tracker, optimizer_c)
                     total_loss += CLASSIFIER_LOSS_WT*loss_c
+                    if (CLASSIFIER_LOSS_WT < 1.0 and GRADUAL_CLASS_WT): CLASSIFIER_LOSS_WT += 2.0/args.epochs
                     optimizers.append(optimizer_c)
                 
                 descend(optimizers, total_loss)
