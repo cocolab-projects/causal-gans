@@ -83,13 +83,13 @@ class CausalMNIST(Dataset):
             print("generated {} worlds.".format(split))
 
         self.imgs = [self.img_transform(Image.fromarray(pt[0])) for pt in scenarios]
-        self.labels = ["causal" in pt[1] for pt in scenarios]
+        self.labels = [pt[1] for pt in scenarios]
 
     def __getitem__(self, index):
         if (self.train_on_mnist):
-            return self.mnist["digits"][index][np.newaxis,...], self.mnist["labels"][index]
+            return self.mnist["digits"][index][np.newaxis,...], self.mnist["labels"][index], None
         else:
-            return self.imgs[index], self.labels[index]
+            return self.imgs[index], self.labels[index], "causal" in self.labels[index]
 
     def __len__(self):
         if (self.train_on_mnist):
