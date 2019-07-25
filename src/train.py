@@ -329,7 +329,7 @@ if __name__ == "__main__":
     # internal args
     cf = False
     transform = True
-    using_gan = True
+    using_gan = False
         # train with inferred counterfactuals
     cf_inf = False
     sample_from = None
