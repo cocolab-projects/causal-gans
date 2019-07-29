@@ -35,8 +35,8 @@ MAX_CLASS_WT = 1.0
 CLASS_LOSS_WT = 0.0 if GRADUAL_LOSS_WT else MAX_CLASS_WT
 SUPRESS_PRINT_STATEMENTS = True
 
-LOSS_KINDS = {  "causal_loss": lambda utts: "causal" in utts,                   # find loss on images labeled '1' (i.e., causal images)
-                "both_nums_loss": lambda utts: NUM1 in utts and NUM2 in utts}   # find loss on all images that contain both NUM1 and NUM2
+LOSS_KINDS = {  "causal_loss": lambda utt: "causal" in utt,                     # find loss on images labeled '1' (i.e., causal images)
+                "both_nums_loss": lambda utt: str(NUM1) in utt and str(NUM2) in utt}   # find loss on all images that contain both NUM1 and NUM2
 
 # ARGUMENTS; CHECKPOINTS AND PROGRESS WHILE TRAINING
 
@@ -56,7 +56,7 @@ def handle_args():
                         help='learning rate [default: 2e-4]')
     parser.add_argument('--lr_d', type=float, default=1e-5,
                         help='discriminator learning rate [default: 1e-5]')
-    parser.add_argument('--epochs', type=int, default=1,
+    parser.add_argument('--epochs', type=int, default=51,
                         help='number of training epochs [default: 101]')
     parser.add_argument('--cuda', action='store_true',
                         help='Enable cuda')
@@ -115,7 +115,7 @@ def get_loss_d(wass, discriminator, x, x_g, valid, fake, attach_inference, z_pri
         pred_real = discriminator(x, z_inf)
         return torch.mean(F.softplus(-pred_real)) + torch.mean(F.softplus(pred_fake))
     elif (wass):
-        return -torch.mean(discriminator(x)) + torch.mean(discriminator(x_g))
+        return -torch.mean(discriminator(x)) + torch.meang(discriminator(x_g))
     else:
         real_loss = discriminator.criterion(discriminator(x), valid)
         fake_loss = discriminator.criterion(discriminator(x_g), fake)
@@ -141,11 +141,10 @@ def clip_discriminator(discriminator):
 # TRAINING FOR LOG REG
 
 def test_loss(loss_kind, outputs, utts, labels, condition, tracker, epoch):
-    breakpoint()
-    relevant_indices = np.where(condition(utts))
+    relevant_indices = np.where([condition(u) for u in utts])
     loss = (outputs[relevant_indices] == labels[relevant_indices])
     loss_amt = np.mean(loss)
-    tracker.update(epoch, "test_" + loss_kind, loss_amt, len(relevant_locs))
+    tracker.update(epoch, "test_" + loss_kind, loss_amt, len(relevant_indices))
 
 # single pass over all data
 def log_reg_run_batch(batch_num, num_batches, imgs, utts, labels, model, mode, epoch, epochs, tracker, optimizer=None):
@@ -160,15 +159,14 @@ def log_reg_run_batch(batch_num, num_batches, imgs, utts, labels, model, mode, e
 
     # if testing for accuracy, round outputs; else add dim to labels
     if (mode == "test"):
-        outputs = np.rint(outputs.numpy().flatten())
-        labels = labels.numpy()
+        outputs = np.rint(outputs.cpu().numpy().flatten())
+        labels = labels.cpu().numpy()
     else:
         labels = labels.unsqueeze(1)
 
     # calculate loss, update tracker
     if (mode == "test"):
         # find loss on images labeled '1' (i.e., causal images)
-        breakpoint()
         for loss_kind, condition in LOSS_KINDS.items():
             test_loss(loss_kind, outputs, utts, labels, condition, tracker, epoch)
 
@@ -218,7 +216,7 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, optimizer = N
     inference_net_state = inference_net.state_dict() if inference_net else None
 
     # run all batches
-    log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, optimizer, generator, inference_net, sample_from, loss_kinds)
+    log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, optimizer, generator, inference_net, sample_from)
     
     # get avg loss for this epoch, save best loss if validating
     avg_loss = tracker[mode + "_loss_c"][epoch].avg
@@ -239,7 +237,6 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, optimizer = N
     if epoch % 10 == 0:
         print('====> {} loss for log reg \t(epoch {}):\t {:.4f}'.format(mode, epoch+1, avg_loss))
     if (mode=="test"):
-        breakpoint()
         for loss_kind in LOSS_KINDS:
             avg_loss = tracker["test_" + loss_kind][epoch].avg
             print('====> test_{}: {}%'.format(loss_kind, to_percent(avg_loss)))
@@ -337,7 +334,7 @@ if __name__ == "__main__":
     # internal args
     cf = False
     transform = True
-    using_gan = True
+    using_gan = False
         # train with inferred counterfactuals
     cf_inf = True
     sample_from = "mix"
