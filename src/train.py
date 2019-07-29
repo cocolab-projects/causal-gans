@@ -30,7 +30,9 @@ from datasets import (CausalMNIST)
 from models import (LogisticRegression, ConvGenerator, ConvDiscriminator, InferenceNet)
 from utils import (LossTracker, AverageMeter, save_checkpoint, free_params, frozen_params, to_percent, viewable_img, reparameterize, latent_cfs)
 
-CLASSIFIER_LOSS_WT = 1.0
+GRADUAL_LOSS_WT = True
+MAX_CLASS_WT = 1.0
+CLASS_LOSS_WT = 0.0 if GRADUAL_LOSS_WT else MAX_CLASS_WT
 SUPRESS_PRINT_STATEMENTS = True
 
 LOSS_KINDS = {  "causal_loss": lambda utts: "causal" in utts,                   # find loss on images labeled '1' (i.e., causal images)
@@ -352,7 +354,7 @@ if __name__ == "__main__":
 
     # Option 2: GAN, with the option to attach a linear classifier
     attach_classifier = True
-    attach_inference = True
+    attach_inference = False
     if (args.wass):
         print("using WGAN.")
     if (attach_classifier):
@@ -417,7 +419,8 @@ if __name__ == "__main__":
 
             # clip discriminator if wass
             if (args.wass): clip_discriminator(discriminator)
-
+	    
+            breakpoint()
             # train generator (and classifier if necessary); execute unconditionally if GAN and periodically if WGAN
             if not args.wass or batch_num % args.n_critic == 0:
                 optimizer_g.zero_grad()
@@ -443,8 +446,9 @@ if __name__ == "__main__":
                         x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), sample_from, generator)
 
                     loss_c = log_reg_run_batch(batch_num, len(train_loader), x_to_classify, utts, labels, classifier, "train(+GAN)", epoch, args.epochs, tracker, optimizer_c)
-                    total_loss += CLASSIFIER_LOSS_WT*loss_c
-                    optimizers.append(optimizer_c)
+                    total_loss += CLASS_LOSS_WT*loss_c
+                    if (CLASS_LOSS_WT < MAX_CLASS_WT and GRADUAL_LOSS_WT): CLASS_LOSS_WT += MAX_CLASS_WT*2.0/args.epochs*(1 if not args.wass else args.n_critic)
+		    optimizers.append(optimizer_c)
                 
                 descend(optimizers, total_loss)
                 tracker.update(epoch, "train_loss_total", total_loss.item(), batch_size)
