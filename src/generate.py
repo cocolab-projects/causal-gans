@@ -168,12 +168,10 @@ def mnist_dir_setup(test):
     file_name = data_file_name(prefix="mnist", suffix = data_kind)
 
     if (os.path.isfile(file_name)):
-        print("retrieving {} mnist data from file...".format(data_kind))
         data = np.load(file_name, allow_pickle=True).item()
         print("retrieved {} mnist data from file.".format(data_kind))
         return data
     else:
-        print("retrieving " + data_kind + " mnist data from online...")
         data = load_mnist(DATA_DIR, test)
         np.save(file_name, data)
         print("retrieved " + data_kind + " mnist data from online.")

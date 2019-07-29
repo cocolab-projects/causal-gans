@@ -194,10 +194,9 @@ def log_reg_run_batch(batch_num, num_batches, imgs, utts, labels, model, mode, e
 
 def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, optimizer, generator, inference_net, sample_from):
     for batch_num, (x, utts, labels) in enumerate(loader):
-        x, labels = x.to(device), labels.to(device)
+        x, utts, labels = x.to(device), utts.to(device) labels.to(device)
         x_to_classify = x
-
-        if (model.cf and x_to_classify.shape[2] == IMG_DIM):
+        if (model.cf and x_to_classify.shape[3] == IMG_DIM):
             # define q(z|x)
             z_inf_mu, z_inf_logvar = inference_net(x)
 
@@ -238,11 +237,12 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, optimizer = N
         }, tracker.best_loss == avg_loss, folder = args.out_dir)
 
     # report loss
-    print('====> {} loss for log reg \t(epoch {}):\t {:.4f}'.format(mode, epoch+1, avg_loss))
     if (mode=="test"):
         for loss_kind in LOSS_KINDS:
             avg_loss = tracker["test_" + loss_kind][epoch].avg
             print('====> test_{}: {}%'.format(loss_kind, to_percent(1.0-avg_loss)))
+    else:
+        print('====> {} loss for log reg \t(epoch {}):\t {:.4f}'.format(mode, epoch+1, avg_loss))
     return avg_loss
 
 # train/test/validate log reg
@@ -331,12 +331,14 @@ if __name__ == "__main__":
     np.random.seed(args.seed)
 
     # internal args
-    cf = True
+    cf = False
     transform = True
-    using_gan = False
+    using_gan = True
         # train with inferred counterfactuals
     cf_inf = False
-    sample_from = "mix"
+    sample_from = "post"
+    if (cf):
+        print("training on human cfs.")
 
     # set up classifier, data loaders, loss tracker
     classifier = LogisticRegression(cf or cf_inf).to(device)
@@ -383,7 +385,7 @@ if __name__ == "__main__":
         pbar = tqdm(total = len(train_loader))
         # train
         for batch_num, (x, utts, labels) in enumerate(train_loader):
-            x, labels = x.to(device), labels.to(device)
+            x, utts, labels = x.to(device), utts.to(device), labels.to(device)
             # x.shape = (64, 1, 64, 64)
             batch_size = x.size(0)
 
@@ -444,8 +446,8 @@ if __name__ == "__main__":
 
                     loss_c = log_reg_run_batch(batch_num, len(train_loader), x_to_classify, utts, labels, classifier, "train(+GAN)", epoch, args.epochs, tracker, optimizer_c)
                     total_loss += CLASS_LOSS_WT*loss_c
-                    if (CLASS_LOSS_WT < MAX_CLASS_WT and GRADUAL_LOSS_WT):
-                        CLASS_LOSS_WT += MAX_CLASS_WT*2.0/args.epochs*(1 if not args.wass else args.n_critic)
+                    if (CLASS_LOSS_WT < MAX_CLASS_WT and GRADUAL_LOSS_WT and epoch > 25):
+                        CLASS_LOSS_WT += MAX_CLASS_WT*2.0/(args.epochs-25)*(1 if not args.wass else args.n_critic)
                 optimizers.append(optimizer_c)
                      
                 descend(optimizers, total_loss)
@@ -474,11 +476,39 @@ if __name__ == "__main__":
     generator.load_state_dict(generator_state)
     inference_net.load_state_dict(inference_net_state)
 
+    generator.eval()
+    inference_net.eval()
+
+    if args.cuda:
+        generator.cuda()
+        inference_net.cuda()
+   
+    for batch_num, (x, utts, labels) in enumerate(test_loader):
+        x, utts, labels = x.to(device), utts.to(device), labels.to(device)
+
+        # define q(z|x)
+        z_inf_mu, z_inf_logvar = inference_net(x) # note: x may not be appropriate shape
+        
+        if batch_num == 0:
+            imgs = x
+            means = z_inf_mu
+        else:
+            imgs = torch.cat((imgs, x))
+            means = torch.cat((means, z_inf_mu))
+
     # plot PCA
+    latents = latents.cpu().data.numpy()
+    pca = PCA(n_components=2)
+    latents = pca.fit_transform(latents)
+    labels = labels.cpu().data.numpy()
+    
     colors = iter(cm.rainbow(np.linspace(0,1,10))) # ten kinds of colors
 
     plt.figure()
-
+    for i in xrange(10):
+        latents_i = latents[labels == i]
+        plt.scatter(latents_i[:, 0], latents_i[:, 1], color=next(colors), 
+                    label=str(i), alpha=0.3, edgecolors='none')
     plt.legend()
     plt.savefig('./ALI_sanity_check.png')
 breakpoint()

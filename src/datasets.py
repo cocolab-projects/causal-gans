@@ -74,11 +74,9 @@ class CausalMNIST(Dataset):
         flags = "{}{}".format("-cf" if cf else "", "-tr" if transform else "")
         file_name = data_file_name(prefix = "scenario", suffix = split + flags)
         if (os.path.isfile(file_name)):
-            print("retrieving {} worlds from file...".format(split))
             scenarios = np.load(file_name, allow_pickle=True)
             print("retrieved {} worlds from file.".format(split))
         else:
-            print("generating {} worlds...".format(split))
             scenarios = generate_worlds(self.mnist, n=self.length, cf=cf, transform=transform)
             np.save(file_name, scenarios)
             print("generated {} worlds.".format(split))
