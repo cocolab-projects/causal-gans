@@ -10,9 +10,13 @@ Much credit for GAN training goes to eriklindernoren, mhw32
 import os
 import copy
 from itertools import chain
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 import numpy as np
 from tqdm import tqdm
+from sklearn.decomposition import PCA
 
 # torch
 import torch
@@ -25,7 +29,7 @@ from torchvision.utils import save_image
 import torchvision.utils as utils
 
 # from this dir
-from generate import (mnist_dir_setup, NUM1, NUM2)
+from generate import (mnist_dir_setup, NUM1, NUM2, IMG_DIM)
 from datasets import (CausalMNIST)
 from models import (LogisticRegression, ConvGenerator, ConvDiscriminator, InferenceNet)
 from utils import (LossTracker, AverageMeter, save_checkpoint, free_params, frozen_params, to_percent, viewable_img, reparameterize, latent_cfs)
@@ -193,7 +197,7 @@ def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, optimiz
         x, labels = x.to(device), labels.to(device)
         x_to_classify = x
 
-        if (generator and inference_net and sample_from):
+        if (model.cf and x_to_classify.shape[2] == IMG_DIM):
             # define q(z|x)
             z_inf_mu, z_inf_logvar = inference_net(x)
 
@@ -234,12 +238,11 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, optimizer = N
         }, tracker.best_loss == avg_loss, folder = args.out_dir)
 
     # report loss
-    if epoch % 10 == 0:
-        print('====> {} loss for log reg \t(epoch {}):\t {:.4f}'.format(mode, epoch+1, avg_loss))
+    print('====> {} loss for log reg \t(epoch {}):\t {:.4f}'.format(mode, epoch+1, avg_loss))
     if (mode=="test"):
         for loss_kind in LOSS_KINDS:
             avg_loss = tracker["test_" + loss_kind][epoch].avg
-            print('====> test_{}: {}%'.format(loss_kind, to_percent(avg_loss)))
+            print('====> test_{}: {}%'.format(loss_kind, to_percent(1.0-avg_loss)))
     return avg_loss
 
 # train/test/validate log reg
@@ -267,10 +270,6 @@ def test_log_reg_from_checkpoint(test_loader, tracker, out_dir, cf, sample_from)
     if (inference_net_state): inference_net.load_state_dict(inference_net_state)
 
     log_reg_run_epoch(test_loader, test_model, "test", 0, 0, tracker, generator=generator, inference_net=inference_net, sample_from=sample_from)
-
-def get_causal_mnist_dataset(mode, cf, transform, mnist):
-    data = CausalMNIST(split=mode, mnist=mnist, cf=cf, transform=transform)
-    return data
 
 def get_causal_mnist_loaders(using_gan, cf, transform, train_on_mnist):
     train_mnist = mnist_dir_setup(test=False)
@@ -332,11 +331,11 @@ if __name__ == "__main__":
     np.random.seed(args.seed)
 
     # internal args
-    cf = False
+    cf = True
     transform = True
     using_gan = False
         # train with inferred counterfactuals
-    cf_inf = True
+    cf_inf = False
     sample_from = "mix"
 
     # set up classifier, data loaders, loss tracker
@@ -351,13 +350,15 @@ if __name__ == "__main__":
 
     # Option 2: GAN, with the option to attach a linear classifier
     attach_classifier = True
-    attach_inference = False
+    attach_inference = True
     if (args.wass):
         print("using WGAN.")
     if (attach_classifier):
         print("attaching classifier.")
     if (attach_inference):
         print("using ALI.")
+    if (cf_inf):
+        print("using generated cfs.")
 
     # setup models and optimizers
     generator = ConvGenerator(args.latent_dim, args.wass, args.train_on_mnist).to(device)
@@ -416,8 +417,7 @@ if __name__ == "__main__":
 
             # clip discriminator if wass
             if (args.wass): clip_discriminator(discriminator)
-	    
-            breakpoint()
+
             # train generator (and classifier if necessary); execute unconditionally if GAN and periodically if WGAN
             if not args.wass or batch_num % args.n_critic == 0:
                 optimizer_g.zero_grad()
@@ -444,9 +444,10 @@ if __name__ == "__main__":
 
                     loss_c = log_reg_run_batch(batch_num, len(train_loader), x_to_classify, utts, labels, classifier, "train(+GAN)", epoch, args.epochs, tracker, optimizer_c)
                     total_loss += CLASS_LOSS_WT*loss_c
-                    if (CLASS_LOSS_WT < MAX_CLASS_WT and GRADUAL_LOSS_WT): CLASS_LOSS_WT += MAX_CLASS_WT*2.0/args.epochs*(1 if not args.wass else args.n_critic)
-		    optimizers.append(optimizer_c)
-                
+                    if (CLASS_LOSS_WT < MAX_CLASS_WT and GRADUAL_LOSS_WT):
+                        CLASS_LOSS_WT += MAX_CLASS_WT*2.0/args.epochs*(1 if not args.wass else args.n_critic)
+                optimizers.append(optimizer_c)
+                     
                 descend(optimizers, total_loss)
                 tracker.update(epoch, "train_loss_total", total_loss.item(), batch_size)
 
@@ -463,5 +464,21 @@ if __name__ == "__main__":
     # test
     if (attach_classifier):
         test_log_reg_from_checkpoint(test_loader, tracker, args.out_dir, cf or cf_inf, sample_from)
+    
+    # PCA
+    epoch, classifier_state, generator_state, inference_net_state, tracker, cached_args = load_checkpoint(folder=args.out_dir)
 
+    generator = ConvGenerator(cached_args.latent_dim, cached_args.wass, cached_args.train_on_mnist).to(device)
+    inference_net = InferenceNet(1, 64, cached_args.latent_dim).to(device)
+
+    generator.load_state_dict(generator_state)
+    inference_net.load_state_dict(inference_net_state)
+
+    # plot PCA
+    colors = iter(cm.rainbow(np.linspace(0,1,10))) # ten kinds of colors
+
+    plt.figure()
+
+    plt.legend()
+    plt.savefig('./ALI_sanity_check.png')
 breakpoint()

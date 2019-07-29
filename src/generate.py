@@ -169,7 +169,7 @@ def mnist_dir_setup(test):
 
     if (os.path.isfile(file_name)):
         print("retrieving {} mnist data from file...".format(data_kind))
-        data = np.load(file_name).item()
+        data = np.load(file_name, allow_pickle=True).item()
         print("retrieved {} mnist data from file.".format(data_kind))
         return data
     else:

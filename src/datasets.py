@@ -71,10 +71,11 @@ class CausalMNIST(Dataset):
             raise RuntimeError("CausalMNIST was expecting split to be 'train', 'validate', or 'test'.")
 
         # retrieve square images, using self.mnist and self.length
-        file_name = data_file_name(prefix = "scenario", suffix = split)
+        flags = "{}{}".format("-cf" if cf else "", "-tr" if transform else "")
+        file_name = data_file_name(prefix = "scenario", suffix = split + flags)
         if (os.path.isfile(file_name)):
             print("retrieving {} worlds from file...".format(split))
-            scenarios = np.load(file_name)
+            scenarios = np.load(file_name, allow_pickle=True)
             print("retrieved {} worlds from file.".format(split))
         else:
             print("generating {} worlds...".format(split))
