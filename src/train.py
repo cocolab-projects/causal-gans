@@ -34,7 +34,7 @@ from datasets import (CausalMNIST)
 from models import (LogisticRegression, ConvGenerator, ConvDiscriminator, InferenceNet)
 from utils import (LossTracker, AverageMeter, save_checkpoint, free_params, frozen_params, to_percent, viewable_img, reparameterize, latent_cfs)
 
-GRADUAL_LOSS_WT = True
+GRADUAL_LOSS_WT = False
 MAX_CLASS_WT = 1.0
 CLASS_LOSS_WT = 0.0 if GRADUAL_LOSS_WT else MAX_CLASS_WT
 SUPRESS_PRINT_STATEMENTS = True
@@ -78,7 +78,7 @@ def handle_args():
                         help="lower and upper clip value for disc. weights")
     parser.add_argument("--n_critic", type=int, default=5,
                         help="number of training steps for discriminator per iter")
-    parser.add_argument("--wass", type=bool, default=True,
+    parser.add_argument("--wass", type=bool, default=False,
                         help="use WGAN instead of GAN")
     parser.add_argument("--train_on_mnist", type=bool, default=False,
                         help="train on MNIST instead of CMNIST")
@@ -194,7 +194,7 @@ def log_reg_run_batch(batch_num, num_batches, imgs, utts, labels, model, mode, e
 
 def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, optimizer, generator, inference_net, sample_from):
     for batch_num, (x, utts, labels) in enumerate(loader):
-        x, utts, labels = x.to(device), utts.to(device) labels.to(device)
+        x, utts, labels = x.to(device), utts.to(device), labels.to(device)
         x_to_classify = x
         if (model.cf and x_to_classify.shape[3] == IMG_DIM):
             # define q(z|x)
@@ -238,9 +238,10 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, optimizer = N
 
     # report loss
     if (mode=="test"):
+        print('====> total test loss for log reg \t(epoch {}):\t {:.4f}'.format(epoch+1, to_percent(avg_loss)))
         for loss_kind in LOSS_KINDS:
             avg_loss = tracker["test_" + loss_kind][epoch].avg
-            print('====> test_{}: {}%'.format(loss_kind, to_percent(1.0-avg_loss)))
+            print('====> test_{} loss: {}%'.format(loss_kind, to_percent(1.0-avg_loss)))
     else:
         print('====> {} loss for log reg \t(epoch {}):\t {:.4f}'.format(mode, epoch+1, avg_loss))
     return avg_loss
@@ -261,6 +262,7 @@ def run_log_reg(train_loader, valid_loader, test_loader, args, cf, tracker):
 def test_log_reg_from_checkpoint(test_loader, tracker, out_dir, cf, sample_from):
     epoch, classifier_state, generator_state, inference_net_state, tracker, cached_args = load_checkpoint(folder=out_dir)
 
+    test_model = LogisticRegression(cf).to(device)
     test_model = LogisticRegression(cf).to(device)
     generator = ConvGenerator(cached_args.latent_dim, cached_args.wass, cached_args.train_on_mnist).to(device)
     inference_net = InferenceNet(1, 64, cached_args.latent_dim).to(device)
@@ -511,4 +513,3 @@ if __name__ == "__main__":
                     label=str(i), alpha=0.3, edgecolors='none')
     plt.legend()
     plt.savefig('./ALI_sanity_check.png')
-breakpoint()
