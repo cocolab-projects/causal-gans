@@ -14,12 +14,29 @@ PROCESSED_MAX_COLOR = 1.0
 EPSILON = 1e-3      # window around z to resample
 PRIOR_WEIGHT = .5   # weights for prior (as opposed to posterior) distribution
 
-# UTILS: SAVING/READING FILES
+# UTILS: data -> string
 
 def data_file_name(prefix, suffix):
     cur_dir = os.path.dirname(__file__)
     file_name = os.path.join(cur_dir, "../data/{}_{}.npy".format(prefix, suffix))
     return os.path.realpath(file_name)
+
+def args_to_string(args):
+    string = "args: ["
+    if (args.wass):
+        string += "w"
+    if (args.using_gan):
+        string += "g"
+    if (args.attach_classifier):
+        string += "/c"
+    if (args.attach_inference):
+        string += "/i"
+    if (args.cf_inf):
+        string += "/cf from {}".format(args.sample_from)
+    if (args.human_cf):
+        string += "human cfs"
+    string += "]"
+    return string
 
 # UTILS: MODELS and PREPROCESSING
 
