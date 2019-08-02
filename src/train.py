@@ -51,6 +51,8 @@ def handle_args():
     parser.add_argument('--resample_eps', type=float, default=1e-3,
                         help='epsilon ball to resample z')
     # for learning
+    parser.add_argument('--transform', action='store_false',
+                        help='apply nonlinear transform to causal images')
     parser.add_argument('--batch_size', type=int, default=64,
                         help='batch size [default=64]')
     parser.add_argument('--lr', type=float, default=2e-4,
@@ -59,14 +61,14 @@ def handle_args():
                         help='discriminator learning rate [default: 1e-5]')
     parser.add_argument('--epochs', type=int, default=51,
                         help='number of training epochs [default: 101]')
-    parser.add_argument('--cuda', action='store_true',
+    parser.add_argument('--cuda', action='store_false',
                         help='Enable cuda')
     parser.add_argument("--b1", type=float, default=0.9,
                         help="adam: decay of first order momentum of gradient")
     parser.add_argument("--b2", type=float, default=0.999,
                         help="adam: decay of first order momentum of gradient")
     # when not using GAN
-    parser.add_argument("--human_cf", type=bool, default=False)
+    parser.add_argument("--human_cf", action='store_true')
 
     # when using GN
     parser.add_argument("--latent_dim", type=int, default=4,
@@ -75,29 +77,31 @@ def handle_args():
                         help="interval betwen image samples")
     parser.add_argument("--clip_value", type=float, default=0.01,
                         help="lower and upper clip value for disc. weights")
-    parser.add_argument("--n_critic", type=int, default=5,
+    parser.add_argument('--n_critic', type=int, default=5,
                         help="number of training steps for discriminator per iter")
-    parser.add_argument("--wass", type=bool, default=False,
+    parser.add_argument('--wass', action='store_true',
                         help="use WGAN instead of GAN")
-    parser.add_argument("--train_on_mnist", type=bool, default=False,
+    parser.add_argument("--train_on_mnist", action='store_true',
                         help="train on MNIST instead of CMNIST")
-    parser.add_argument("--using_gan", type=bool, default=False)
-    parser.add_argument("--attach_classifier", type=bool, default=False)
-    parser.add_argument("--attach_inference", type=bool, default=False)
-    parser.add_argument("--cf_inf", type=bool, default=False)
+    parser.add_argument("--using_gan", action='store_true')
+    parser.add_argument("--attach_classifier", action='store_true')
+    parser.add_argument("--attach_inference", action='store_true')
+    parser.add_argument("--cf_inf", action='store_true')
     parser.add_argument("--sample_from", type=str, default="post")
-    parser.add_argument("--gradual_wt", type=bool, default=True)
+    parser.add_argument("--gradual_wt", action='store_false')
 
     args = parser.parse_args()
 
     args.cuda = args.cuda and torch.cuda.is_available()
 
     if (args.cf_inf):
+        args.attach_classifier = True
         args.attach_inference = True
-    if (args.attach_inference or args.attach_classifier):
+    if (args.wass or args.attach_inference or args.attach_classifier):
         args.using_gan = True
     if (args.using_gan):
-        human_cf = False
+        args.human_cf = False
+    return args
 
 def load_checkpoint(folder='./', filename='model_best.pth.tar'):
     checkpoint = torch.load(folder + filename)
@@ -116,7 +120,7 @@ def record_progress(epoch, epochs, batch_num, num_batches, tracker, kind, amt, b
     # save tracker avgs (for each epoch) to file
     num_epochs_with_data = len(tracker[kind])
     data = [tracker[kind][e].avg for e in range(num_epochs_with_data)]
-    np.savetxt("./progress_{}_{}.txt".format(arg_str, kind), data)
+    np.savetxt("./progress_{}_{}.txt".format(kind, arg_str), data)
 
 # TRAINING
 
@@ -252,12 +256,12 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, arg_str, opti
 
     # report loss
     if (mode=="test"):
-        print('====> total test loss for log reg \t(epoch {}):\t {:.4f}'.format(epoch+1, to_percent(avg_loss)))
+        print('====> test_total loss: \t\t\t {}%'.format(to_percent(1.0-avg_loss)))
         for loss_kind in LOSS_KINDS:
             avg_loss = tracker["test_" + loss_kind][epoch].avg
-            print('====> test_{} loss: {}%'.format(loss_kind, to_percent(1.0-avg_loss)))
+            print('====> test_{} loss:\t\t {}%'.format(loss_kind, to_percent(1.0-avg_loss)))
     else:
-        print('====> {} loss for log reg \t(epoch {}):\t {:.4f}'.format(mode, epoch+1, avg_loss))
+        print('====> {} loss log reg \t(epoch {}):\t\t {:.4f}'.format(mode, epoch+1, avg_loss))
     return avg_loss
 
 # train/test/validate log reg
@@ -270,10 +274,10 @@ def run_log_reg(train_loader, valid_loader, test_loader, args, cf, tracker):
         log_reg_run_epoch(train_loader, model, "train", epoch, args.epochs, tracker, args_to_string(args), optimizer=optimizer)
         log_reg_run_epoch(valid_loader, model, "validate", epoch, args.epochs, tracker, args_to_string(args))
 
-    test_log_reg_from_checkpoint(test_loader, tracker, args.out_dir, cf, None. args_to_string(args))
+    test_log_reg_from_checkpoint(test_loader, tracker, args.out_dir, cf, args_to_string(args))
 
 # test log reg
-def test_log_reg_from_checkpoint(test_loader, tracker, out_dir, cf, sample_from, arg_str):
+def test_log_reg_from_checkpoint(test_loader, tracker, out_dir, cf, arg_str, sample_from=None):
     epoch, classifier_state, generator_state, inference_net_state, tracker, cached_args = load_checkpoint(folder=out_dir)
 
     test_model = LogisticRegression(cf).to(device)
@@ -303,7 +307,7 @@ def get_causal_mnist_loaders(using_gan, cf, transform, train_on_mnist):
 
     return train_loader, valid_loader, test_loader
 
-def save_images_from_g(generator, epoch, wass, latent_dim, batch_size):
+def save_images_from_g(generator, epoch, wass, latent_dim, batch_size, arg_str):
     with torch.no_grad():
         # z ~ N(0,1)
         z = torch.randn(batch_size, latent_dim, device=device)
@@ -315,7 +319,7 @@ def save_images_from_g(generator, epoch, wass, latent_dim, batch_size):
         n_images = n_imgs_per_row**2
 
         if epoch % 5 == 0:
-            title = "{}GAN after {} epochs.png".format("W" if wass else "", format(epoch, "04"))
+            title = "{}GAN after {} epochs {}.png".format("W" if wass else "", format(epoch, "04"), arg_str)
             save_image(gen_imgs.data[:n_images], title, nrow=n_imgs_per_row, normalize=True)
 
 def combine_x_cf(x, z_inf, z_inf_mu, z_inf_sigma, sample_from, generator):
@@ -346,7 +350,7 @@ if __name__ == "__main__":
     np.random.seed(args.seed)
 
     arg_str = args_to_string(args)
-    print(arg_str)
+    print("args: " + arg_str)
 
     # set up classifier, data loaders, loss tracker
     classifier = LogisticRegression(args.human_cf or args.cf_inf).to(device)
@@ -447,7 +451,8 @@ if __name__ == "__main__":
                     if (classifier_loss_weight < MAX_CLASS_WT and args.gradual_wt and epoch > 25):
                         classifier_loss_weight += MAX_CLASS_WT*2.0/(args.epochs-25)*(1 if not args.wass else args.n_critic)
 
-                    print ("classifier loss weight (batch {}/{}): {}".format(batch_num, len(train_loader), classifier_loss_weight))
+                    if (batch_num % 30 == 0):
+                            print ("classifier loss weight (batch {}/{}): {}".format(batch_num, len(train_loader), classifier_loss_weight))
                 optimizers.append(optimizer_c)
                      
                 descend(optimizers, total_loss)
@@ -457,7 +462,7 @@ if __name__ == "__main__":
         pbar.close()
         # finished training for epoch; print train loss, output images
         print('====> total train loss\t\t\t(epoch {}):\t {:.4f}'.format(epoch+1, tracker["train_loss_total"][epoch].avg))
-        save_images_from_g(generator, epoch+1, args.wass, args.latent_dim, args.batch_size)
+        save_images_from_g(generator, epoch+1, args.wass, args.latent_dim, args.batch_size, arg_str)
         
         # validate (if attach_classifier); this saves a checkpoint if the loss was especially good
         if (args.attach_classifier):
@@ -465,13 +470,11 @@ if __name__ == "__main__":
 
     # test
     if (args.attach_classifier):
-        test_log_reg_from_checkpoint(test_loader, tracker, args.out_dir, args.human_cf or args.cf_inf, args.sample_from, arg_str)
+        test_log_reg_from_checkpoint(test_loader, tracker, args.out_dir, args.human_cf or args.cf_inf, arg_str, args.sample_from)
     
     # PCA
+    print("finished testing. starting PCA.")
     epoch, classifier_state, generator_state, inference_net_state, tracker, cached_args = load_checkpoint(folder=args.out_dir)
-
-    generator = ConvGenerator(cached_args.latent_dim, cached_args.wass, cached_args.train_on_mnist).to(device)
-    inference_net = InferenceNet(1, 64, cached_args.latent_dim).to(device)
 
     generator.load_state_dict(generator_state)
     inference_net.load_state_dict(inference_net_state)
@@ -479,10 +482,6 @@ if __name__ == "__main__":
     generator.eval()
     inference_net.eval()
 
-    if args.cuda:
-        generator.cuda()
-        inference_net.cuda()
-   
     with torch.no_grad():
         for batch_num, (x, utts, labels) in enumerate(test_loader):
             x, utts, labels = x.to(device), utts, labels.to(device)
@@ -491,24 +490,29 @@ if __name__ == "__main__":
             z_inf_mu, z_inf_logvar = inference_net(x) # note: x may not be appropriate shape
             
             if batch_num == 0:
-                imgs = x
+                all_utts = utts
                 means = z_inf_mu
             else:
-                imgs = torch.cat((imgs, x))
+                all_utts = np.concatenate((all_utts,utts))
                 means = torch.cat((means, z_inf_mu))
 
+    print("finished PCA. plotting PCA.")
     # plot PCA
-    latents = latents.cpu().data.numpy()
+    means = means.cpu().data.numpy()
     pca = PCA(n_components=2)
-    latents = pca.fit_transform(latents)
-    labels = labels.cpu().data.numpy()
+    means = pca.fit_transform(means)
+#    tsne = TSNE(n_components=2, verbose=1, perplexity=40,n_iter=300)
+ #   imgs = tsne.fit_transform(imgs)
     
-    colors = iter(cm.rainbow(np.linspace(0,1,10))) # ten kinds of colors
+    utt_kinds = list(set(all_utts))
+    colors = iter(cm.rainbow(np.linspace(0,1,len(utt_kinds))))
 
     plt.figure()
-    for i in xrange(10):
-        latents_i = latents[labels == i]
-        plt.scatter(latents_i[:, 0], latents_i[:, 1], color=next(colors), 
-                    label=str(i), alpha=0.3, edgecolors='none')
+    for i, kind in enumerate(utt_kinds):
+        means_i = means[all_utts == kind]
+        plt.scatter(means_i[:, 0], means_i[:, 1], color=next(colors), 
+                    label=kind, alpha=0.3, edgecolors='none')
     plt.legend()
     plt.savefig('./ALI_sanity_check.png')
+    print("plotted PCA")
+    breakpoint()

@@ -22,17 +22,17 @@ def data_file_name(prefix, suffix):
     return os.path.realpath(file_name)
 
 def args_to_string(args):
-    string = "args: ["
+    string = "["
     if (args.wass):
         string += "w"
     if (args.using_gan):
         string += "g"
     if (args.attach_classifier):
-        string += "/c"
+        string += "+c"
     if (args.attach_inference):
-        string += "/i"
+        string += "+i"
     if (args.cf_inf):
-        string += "/cf from {}".format(args.sample_from)
+        string += "+cf from {}".format(args.sample_from)
     if (args.human_cf):
         string += "human cfs"
     string += "]"
