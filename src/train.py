@@ -36,6 +36,7 @@ from models import (LogisticRegression, ConvGenerator, ConvDiscriminator, Infere
 from utils import (LossTracker, AverageMeter, save_checkpoint, free_params, frozen_params, to_percent, viewable_img, reparameterize, latent_cfs, args_to_string)
 
 DATA_DIR = "/mnt/fs5/mmosse19/causal-gans/progress"
+START_INCREASE_CLASS_WT = 25
 MAX_CLASS_WT = 1.0
 SUPRESS_PRINT_STATEMENTS = True
 LOSS_KINDS = {  "causal_loss": lambda utt: "causal" in utt,                     # find loss on images labeled '1' (i.e., causal images)
@@ -105,7 +106,8 @@ def handle_args():
         args.human_cf = False
     return args
 
-def load_checkpoint(folder='./', filename='model_best.pth.tar'):
+def load_checkpoint(folder, arg_str):
+    filename = 'model_best{}.pth.tar'.format(arg_str)
     checkpoint = torch.load(folder + filename)
     return checkpoint['epoch'], checkpoint['classifier_state'], checkpoint['generator_state'], checkpoint['inference_net_state'], checkpoint['tracker'], checkpoint['cached_args']
 
@@ -119,7 +121,7 @@ def record_progress(epoch, epochs, batch_num, num_batches, tracker, kind, amt, b
     
     if (batch_num % 30 == 0) and not SUPRESS_PRINT_STATEMENTS: print(progress)
 
-    # save tracker avgs (for each epoch) to file
+    # save tracker loss avgs (for each epoch) to file
     num_epochs_with_data = len(tracker[kind])
     data = [tracker[kind][e].avg for e in range(num_epochs_with_data)]
     np.savetxt(os.path.join(DATA_DIR, "progress_{}_{}.txt".format(kind, arg_str)), data)
@@ -246,7 +248,7 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, arg_str, opti
 
     if (mode == "validate"):
         tracker.best_loss = min(avg_loss, tracker.best_loss)
-                
+                        
         save_checkpoint({
             'epoch': epoch,
             'classifier_state': model.state_dict(),
@@ -254,7 +256,12 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, arg_str, opti
             'inference_net_state': inference_net_state,
             'tracker': tracker,
             'cached_args': args,
-        }, tracker.best_loss == avg_loss, folder = args.out_dir)
+        }, tracker.best_loss == avg_loss, folder = args.out_dir, arg_str)
+
+        for loss_kind in LOSS_KINDS:
+            avg_loss = tracker["validate_" + loss_kind][epoch].avg
+            
+            np.savetxt(os.path.join(DATA_DIR, "validate_{}_{}.txt".format(kind, arg_str)), to_percent())
 
     # report loss
     if (mode=="test"):
@@ -280,7 +287,7 @@ def run_log_reg(train_loader, valid_loader, test_loader, args, cf, tracker):
 
 # test log reg
 def test_log_reg_from_checkpoint(test_loader, tracker, out_dir, cf, arg_str, sample_from=None):
-    epoch, classifier_state, generator_state, inference_net_state, tracker, cached_args = load_checkpoint(folder=out_dir)
+    epoch, classifier_state, generator_state, inference_net_state, tracker, cached_args = load_checkpoint(out_dir, arg_str)
 
     test_model = LogisticRegression(cf).to(device)
     test_model = LogisticRegression(cf).to(device)
@@ -452,12 +459,11 @@ if __name__ == "__main__":
 
                     loss_c = log_reg_run_batch(batch_num, len(train_loader), x_to_classify, utts, labels, classifier, "train(+GAN)", epoch, args.epochs, tracker, arg_str)
                     total_loss += classifier_loss_weight*loss_c
-                    if (epoch == 0):
-                        loss_wts.append(classifier_loss_weight)
-                        np.savetxt(os.path.join(DATA_DIR,"./progress_class_loss_wt_{}.txt".format(arg_str)), loss_wts)
+                    loss_wts.append(classifier_loss_weight)
+                    np.savetxt(os.path.join(DATA_DIR,"./progress_class_loss_wt_{}.txt".format(arg_str)), loss_wts)
 
-                    if (classifier_loss_weight < MAX_CLASS_WT and args.gradual_wt and epoch > 25):
-                        classifier_loss_weight += MAX_CLASS_WT*2.0/(args.epochs-25)/len(train_loader)*(1 if not args.wass else args.n_critic)
+                    if (classifier_loss_weight < MAX_CLASS_WT and args.gradual_wt and epoch > START_INCREASE_CLASS_WT):
+                        classifier_loss_weight += MAX_CLASS_WT*(1 if not args.wass else args.n_critic) / ((args.epochs-25)*len(train_loader))
 
                 optimizers.append(optimizer_c)
                      
@@ -480,7 +486,7 @@ if __name__ == "__main__":
 
     # PCA
     print("finished testing. starting PCA.")
-    epoch, classifier_state, generator_state, inference_net_state, tracker, cached_args = load_checkpoint(folder=args.out_dir)
+    epoch, classifier_state, generator_state, inference_net_state, tracker, cached_args = load_checkpoint(args.out_dir, arg_str)
 
     generator.load_state_dict(generator_state)
     inference_net.load_state_dict(inference_net_state)

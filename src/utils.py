@@ -1,3 +1,4 @@
+import datetime
 import os
 import torch
 import shutil
@@ -35,7 +36,7 @@ def args_to_string(args):
         string += "+cf from {}".format(args.sample_from)
     if (args.human_cf):
         string += "human cfs"
-    string += "-e{}".format(args.epochs)
+    string += "-e{}-{}".format(args.epochs, datetime.datetime.now())
     string += "]"
     return string
 
@@ -125,13 +126,14 @@ class LossTracker():
     def __getitem__(self, kind):
         return self.loss_kinds[kind]
 
-def save_checkpoint(state, is_best, folder='./', filename='checkpoint.pth.tar'):
+def save_checkpoint(state, is_best, folder='./', arg_str):
+    filename = 'checkpoint{}.pth.tar'.format(arg_str)
     if not os.path.isdir(folder):
         os.mkdir(folder)
     torch.save(state, os.path.join(folder, filename))
     if is_best:
         shutil.copyfile(os.path.join(folder, filename),
-                        os.path.join(folder, 'model_best.pth.tar'))
+                        os.path.join(folder, 'model_best{}.pth.tar'.format(arg_str))
 
 def free_params(module):
     for p in module.parameters(): p.requires_grad = True
@@ -186,32 +188,6 @@ def latent_cfs(dim, z, mu, sigma, sample_from):
     z_cf[:, dim] = cfs
 
     return z_cf
-
-"""
-def latent_cfs(generator, x_act, z_inf, post_mean, post_logvar, sample_from):
-    generator.train()
-    batch_size = z_inf.size(0)
-    latent_dim = z_inf.size(1)
-    post_std_dev = torch.exp(0.5*post_logvar)
-
-    batch_img_w_cfs = []
-    for img_loc in range(batch_size):
-        imgs_of_worlds = [x_act[img_loc]]
-        z_inf_img = z_inf[img_loc]
-
-        for dim in range(latent_dim):
-            cf = copy.deepcopy(z_inf_img) # or .clone()
-            cf[dim] = resample(z_inf_img[dim], post_mean[img_loc][dim], post_std_dev[img_loc][dim], sample_from)
-            imgs_of_worlds.append(generator(cf))
-
-        img_w_cfs = np.concatenate(tuple(imgs_of_worlds), axis=1)
-
-        batch_img_w_cfs.append(img_w_cfs)
-
-
-
-    return torch.FloatTensor(batch_cfs)
-"""
 
 if __name__ == "__main__":
     torch.manual_seed(42)
