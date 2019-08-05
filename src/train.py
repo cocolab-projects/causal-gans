@@ -34,6 +34,7 @@ from datasets import (CausalMNIST)
 from models import (LogisticRegression, ConvGenerator, ConvDiscriminator, InferenceNet)
 from utils import (LossTracker, AverageMeter, save_checkpoint, free_params, frozen_params, to_percent, viewable_img, reparameterize, latent_cfs, args_to_string)
 
+DATA_DIR = "/mnt/fs5/mmosse19/causal-gans/progress"
 MAX_CLASS_WT = 1.0
 SUPRESS_PRINT_STATEMENTS = True
 LOSS_KINDS = {  "causal_loss": lambda utt: "causal" in utt,                     # find loss on images labeled '1' (i.e., causal images)
@@ -120,7 +121,7 @@ def record_progress(epoch, epochs, batch_num, num_batches, tracker, kind, amt, b
     # save tracker avgs (for each epoch) to file
     num_epochs_with_data = len(tracker[kind])
     data = [tracker[kind][e].avg for e in range(num_epochs_with_data)]
-    np.savetxt("./progress_{}_{}.txt".format(kind, arg_str), data)
+    np.savetxt(os.path.join(DATA_DIR, "progress_{}_{}.txt".format(kind, arg_str)), data)
 
 # TRAINING
 
@@ -320,6 +321,7 @@ def save_images_from_g(generator, epoch, wass, latent_dim, batch_size, arg_str):
 
         if epoch % 5 == 0:
             title = "{}GAN after {} epochs {}.png".format("W" if wass else "", format(epoch, "04"), arg_str)
+            title = os.path.join(DATA_DIR, title)
             save_image(gen_imgs.data[:n_images], title, nrow=n_imgs_per_row, normalize=True)
 
 def combine_x_cf(x, z_inf, z_inf_mu, z_inf_sigma, sample_from, generator):
@@ -366,6 +368,7 @@ if __name__ == "__main__":
     generator = ConvGenerator(args.latent_dim, args.wass, args.train_on_mnist).to(device)
     inference_net = InferenceNet(1, 64, args.latent_dim).to(device)
     discriminator = ConvDiscriminator(args.wass, args.train_on_mnist, args.attach_inference, args.latent_dim).to(device)
+    loss_wts = []
 
     generator.train()
     discriminator.train()
@@ -446,13 +449,15 @@ if __name__ == "__main__":
                         # x_to_classify ~ q(x | cf(z_inf))
                         x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.sample_from, generator)
 
-                    loss_c = log_reg_run_batch(batch_num, len(train_loader), x_to_classify, utts, labels, classifier, "train(+GAN)", epoch, args.epochs, tracker, optimizer_c)
+                    loss_c = log_reg_run_batch(batch_num, len(train_loader), x_to_classify, utts, labels, classifier, "train(+GAN)", epoch, args.epochs, tracker, arg_str)
                     total_loss += classifier_loss_weight*loss_c
-                    if (classifier_loss_weight < MAX_CLASS_WT and args.gradual_wt and epoch > 25):
-                        classifier_loss_weight += MAX_CLASS_WT*2.0/(args.epochs-25)*(1 if not args.wass else args.n_critic)
+                    if (epoch == 0):
+                        loss_wts.append(classifier_loss_weight)
+                        np.savetxt(os.path.join(DATA_DIR,"./progress_class_loss_wt_{}.txt".format(arg_str)), loss_wts)
 
-                    if (batch_num % 30 == 0):
-                            print ("classifier loss weight (batch {}/{}): {}".format(batch_num, len(train_loader), classifier_loss_weight))
+                    if (classifier_loss_weight < MAX_CLASS_WT and args.gradual_wt and epoch > 25):
+                        classifier_loss_weight += MAX_CLASS_WT*2.0/(args.epochs-25)/len(train_loader)*(1 if not args.wass else args.n_critic)
+
                 optimizers.append(optimizer_c)
                      
                 descend(optimizers, total_loss)
@@ -471,7 +476,7 @@ if __name__ == "__main__":
     # test
     if (args.attach_classifier):
         test_log_reg_from_checkpoint(test_loader, tracker, args.out_dir, args.human_cf or args.cf_inf, arg_str, args.sample_from)
-    
+
     # PCA
     print("finished testing. starting PCA.")
     epoch, classifier_state, generator_state, inference_net_state, tracker, cached_args = load_checkpoint(folder=args.out_dir)
@@ -505,14 +510,14 @@ if __name__ == "__main__":
  #   imgs = tsne.fit_transform(imgs)
     
     utt_kinds = list(set(all_utts))
-    colors = iter(cm.rainbow(np.linspace(0,1,len(utt_kinds))))
-
+    colors = ["r", "y", "g", "b", "orange"]
     plt.figure()
     for i, kind in enumerate(utt_kinds):
         means_i = means[all_utts == kind]
-        plt.scatter(means_i[:, 0], means_i[:, 1], color=next(colors), 
+        if (kind == ""): kind = "empty"
+        plt.scatter(means_i[:, 0], means_i[:, 1], color=colors[i], 
                     label=kind, alpha=0.3, edgecolors='none')
     plt.legend()
-    plt.savefig('./ALI_sanity_check.png')
+    plt.savefig(os.path.join(DATA_DIR, 'ALI_sanity_check_{}.png'.format(arg_str)))
     print("plotted PCA")
     breakpoint()
