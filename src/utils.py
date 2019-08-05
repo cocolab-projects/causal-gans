@@ -35,6 +35,7 @@ def args_to_string(args):
         string += "+cf from {}".format(args.sample_from)
     if (args.human_cf):
         string += "human cfs"
+    string += "-e{}".format(args.epochs)
     string += "]"
     return string
 

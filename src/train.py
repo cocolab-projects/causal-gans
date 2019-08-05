@@ -17,6 +17,7 @@ import matplotlib.cm as cm
 import numpy as np
 from tqdm import tqdm
 from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
 
 # torch
 import torch
@@ -380,7 +381,7 @@ if __name__ == "__main__":
                                             lr=args.lr)
     optimizer_d = discriminator.optimizer(discriminator.parameters(), lr=args.lr_d)
     optimizer_c = torch.optim.Adam(classifier.parameters(), lr=args.lr, betas=(args.b1, args.b2))
-    
+
     print("set up models/optimizers. now training...")
 
     if (args.attach_classifier): classifier_loss_weight = 0.0 if args.gradual_wt else MAX_CLASS_WT
@@ -506,18 +507,29 @@ if __name__ == "__main__":
     means = means.cpu().data.numpy()
     pca = PCA(n_components=2)
     means = pca.fit_transform(means)
-#    tsne = TSNE(n_components=2, verbose=1, perplexity=40,n_iter=300)
- #   imgs = tsne.fit_transform(imgs)
-    
-    utt_kinds = list(set(all_utts))
+   
+    utt_kinds = sorted(list(set(all_utts)), key=len)
     colors = ["r", "y", "g", "b", "orange"]
     plt.figure()
     for i, kind in enumerate(utt_kinds):
+#        if (kind == "43" or kind == "causal43" or kind == ""): continue
         means_i = means[all_utts == kind]
         if (kind == ""): kind = "empty"
         plt.scatter(means_i[:, 0], means_i[:, 1], color=colors[i], 
                     label=kind, alpha=0.3, edgecolors='none')
     plt.legend()
-    plt.savefig(os.path.join(DATA_DIR, 'ALI_sanity_check_{}.png'.format(arg_str)))
-    print("plotted PCA")
+    plt.savefig(os.path.join(DATA_DIR, 'ALI_PCA{}.png'.format(arg_str)))
+    print("plotted PCA. now doing TSNE.")
+
+    tsne = TSNE(n_components=2, verbose=1, perplexity=40,n_iter=300)
+    means = tsne.fit_transform(means)
+    plt.figure()
+    for i, kind in enumerate(utt_kinds):
+#        if (kind == "43" or kind == "causal43" or kind == ""): continue
+        means_i = means[all_utts == kind]
+        if (kind == ""): kind = "empty"
+        plt.scatter(means_i[:, 0], means_i[:, 1], color=colors[i], 
+                    label=kind, alpha=0.3, edgecolors='none')
+    plt.legend()
+    plt.savefig(os.path.join(DATA_DIR, 'ALI_TSNE{}.png'.format(arg_str)))
     breakpoint()
