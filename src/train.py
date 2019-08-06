@@ -42,7 +42,7 @@ SUPRESS_PRINT_STATEMENTS = True
 LOSS_KINDS = {  "causal_loss_c": lambda utt: "causal" in utt,                     # find loss on images labeled '1' (i.e., causal images)
                 "both_nums_loss_c": lambda utt: str(NUM1) in utt and str(NUM2) in utt}   # find loss on all images that contain both NUM1 and NUM2
 
-# ARGUMENTS; CHECKPOINTS AND PROGRESS WHILE TRAINING
+# ARGUMENTS
 
 def handle_args():
     import argparse
@@ -109,6 +109,8 @@ def handle_args():
 
     return args
 
+# CHECKPOINTS AND PROGRESS WHILE TRAINING
+
 def load_checkpoint(folder, arg_str):
     filename = 'model_best{}.pth.tar'.format(arg_str)
     checkpoint = torch.load(folder + filename)
@@ -127,14 +129,33 @@ def save_losses(tracker, kind, args):
     losses = [tracker[kind][e].avg for e in range(num_epochs_with_data)]
     np.savetxt(os.path.join(args.out_dir, "progress_{}_{}.txt".format(kind, args_to_string(args))), losses)
 
-# TRAINING
+def update_classifier_loss_weight(classifier_loss_weight, loss_wts, args):
+    loss_wts.append(classifier_loss_weight)
+    np.savetxt(os.path.join(args.out_dir,"./progress_class_loss_wt_{}.txt".format(args_to_str(args))), loss_wts)
+
+    if (classifier_loss_weight < MAX_CLASS_WT and args.gradual_wt and epoch > START_INCREASE_CLASS_WT):
+        return MAX_CLASS_WT*(1.0 if not args.wass else args.n_critic) / ((args.epochs-25.0)*len(train_loader))
+    else: return 0.0
+
+def save_imgs_from_g(imgs, epoch, args, cfs):
+    with torch.no_grad():
+        if (not cfs):
+            imgs = imgs.data
+        n_imgs_per_row = 5
+        n_images = n_imgs_per_row**2
+
+        if epoch % 5 == 0:
+            title = "{}GAN {}after {} epochs {}.png".format("W" if args.wass else "", "cfs " if cfs else "", format(epoch, "04"), args_to_string(args))
+            title = os.path.join(args.out_dir, title)
+            save_image(imgs[:n_images], title, nrow=n_imgs_per_row, normalize=True)
+
+# TRAINING GAN (DESCENDING; COMPUTING GAN LOSS; CLIP DISCRIMINATOR; free/freeze params)
 
 def descend(optimizers, loss):
     for optimizer in optimizers: optimizer.zero_grad()
     loss.backward()
     for optimizer in optimizers: optimizer.step()
 
-# COMPUTING LOSS FOR GAN (DISCRIMINATOR AND GENERATOR)
 
 def get_loss_d(wass, discriminator, x, x_g, valid, fake, attach_inference, z_prior, z_inf):
     if (attach_inference):
@@ -159,11 +180,16 @@ def get_loss_g(wass, discriminator, x, x_g, valid, attach_inference, z_prior, z_
         print("wass and attach_inference are both false")
         return discriminator.criterion(discriminator(x_g), valid)
 
-# CLAMPING DISCRIMINATOR FOR GAN
-
 def clip_discriminator(discriminator):
     for p in discriminator.parameters():
         p.data.clamp_(-args.clip_value,args.clip_value)
+
+def set_params(all_models, models_to_free):
+    for model in all_models:
+        if model in models_to_free:
+            free_params(model)
+        else:
+            frozen_params(model)
 
 # TRAINING FOR LOG REG
 
@@ -285,7 +311,6 @@ def run_log_reg(model, optimizer, train_loader, valid_loader, test_loader, args,
 
     test_log_reg_from_checkpoint(test_loader, tracker, args)
 
-# test log reg
 def test_log_reg_from_checkpoint(test_loader, tracker, args):
     epoch, classifier_state, generator_state, inference_net_state, tracker, cached_args = load_checkpoint(args.out_dir, args_to_string(args))
 
@@ -315,18 +340,6 @@ def get_causal_mnist_loaders(using_gan, cf, transform, train_on_mnist):
 
     return train_loader, valid_loader, test_loader
 
-def save_imgs_from_g(imgs, epoch, args, cfs):
-    with torch.no_grad():
-        if (not cfs):
-            imgs = imgs.data
-        n_imgs_per_row = 5
-        n_images = n_imgs_per_row**2
-
-        if epoch % 5 == 0:
-            title = "{}GAN {}after {} epochs {}.png".format("W" if args.wass else "", "cfs " if cfs else "", format(epoch, "04"), args_to_string(args))
-            title = os.path.join(args.out_dir, title)
-            save_image(imgs[:n_images], title, nrow=n_imgs_per_row, normalize=True)
-
 def combine_x_cf(x, z_inf, z_inf_mu, z_inf_sigma, sample_from, generator):
     latent_dim = z_inf.size(1)
     x_to_classify = [[img.squeeze()] for img in x]
@@ -344,6 +357,45 @@ def combine_x_cf(x, z_inf, z_inf_mu, z_inf_sigma, sample_from, generator):
     x_to_classify = [torch.cat(cfs, 0).unsqueeze(0) for cfs in x_to_classify]
 
     return torch.stack(x_to_classify)
+
+# ANALYZING INFERENCE AFTER TESTING
+
+def collect_inferences(inference_net, test_loader)
+    with torch.no_grad():
+        for batch_num, (x, utts, labels) in enumerate(test_loader):
+            x, utts, labels = x.to(device), utts, labels.to(device)
+
+            # define q(z|x)
+            z_inf_mu, z_inf_logvar = inference_net(x) # note: x may not be appropriate shape
+            
+            if batch_num == 0:
+                all_utts = utts
+                means = z_inf_mu
+            else:
+                all_utts = np.concatenate((all_utts,utts))
+                means = torch.cat((means, z_inf_mu))
+
+        return means, all_utts
+
+def run_pca(means, all_utts, use_tsne, kinds_to_ignore)
+    means = means.cpu().data.numpy()
+    pca = PCA(n_components=2)
+    means = pca.fit_transform(means)
+
+    if tsne:
+        tsne = TSNE(n_components=2, verbose=1, perplexity=40,n_iter=300)
+        means = tsne.fit_transform(means)
+
+    plt.figure()
+    for i, kind in enumerate(utt_kinds):
+        if (kind in kinds_to_ignore): continue
+        means_i = means[all_utts == kind]
+        if (kind == ""): kind = "empty"
+        plt.scatter(means_i[:, 0], means_i[:, 1], color=colors[i], 
+                    label=kind, alpha=0.3, edgecolors='none')
+    plt.legend()
+    plt.savefig(os.path.join(args.out_dir, 'ALI_{}{}.png'.format("TSNE" if use_tsne else "PCA", arg_str)))
+
 
 # MAIN
 
@@ -399,10 +451,7 @@ if __name__ == "__main__":
 
             optimizer_d.zero_grad()
 
-            frozen_params(generator)
-            frozen_params(inference_net)
-            frozen_params(classifier)
-            free_params(discriminator)
+            set_params([generator, inference_net, classifier, discriminator], [discriminator])
 
             # adversarial ground truths
             valid = torch.ones(x.size(0), 1, device=device)
@@ -430,12 +479,9 @@ if __name__ == "__main__":
 
             # train generator (and classifier if necessary); execute unconditionally if GAN and periodically if WGAN
             if not args.wass or batch_num % args.n_critic == 0:
-                optimizer_g.zero_grad()
+                optimizer_g.zero_grad() # is this necessary? gets called in descend
 
-                free_params(generator)
-                free_params(inference_net)
-                free_params(classifier)
-                frozen_params(discriminator)
+                set_params([generator, inference_net, classifier, discriminator], [generator, inference_net, classifier])
 
                 # x_g ~ p(x|z_prior)
                 x_g = generator(z_prior)
@@ -457,11 +503,8 @@ if __name__ == "__main__":
 
                     loss_c = log_reg_run_batch(batch_num, len(train_loader), x_to_classify, utts, labels, classifier, "train(+GAN)", epoch, args.epochs, tracker, arg_str)
                     total_loss += classifier_loss_weight*loss_c
-                    loss_wts.append(classifier_loss_weight)
-                    np.savetxt(os.path.join(args.out_dir,"./progress_class_loss_wt_{}.txt".format(arg_str)), loss_wts)
-
-                    if (classifier_loss_weight < MAX_CLASS_WT and args.gradual_wt and epoch > START_INCREASE_CLASS_WT):
-                        classifier_loss_weight += MAX_CLASS_WT*(1 if not args.wass else args.n_critic) / ((args.epochs-25)*len(train_loader))
+                    
+                    classifier_loss_weight += update_classifier_loss_weight(classifier_loss_weight, loss_wts, args)
 
                 optimizers.append(optimizer_c)
                      
@@ -482,7 +525,7 @@ if __name__ == "__main__":
         test_log_reg_from_checkpoint(test_loader, tracker, args)
 
     # PCA
-    print("finished testing. starting PCA.")
+    print("finished testing. running PCA.")
     epoch, classifier_state, generator_state, inference_net_state, tracker, cached_args = load_checkpoint(args.out_dir, arg_str)
 
     generator.load_state_dict(generator_state)
@@ -491,48 +534,8 @@ if __name__ == "__main__":
     generator.eval()
     inference_net.eval()
 
-    with torch.no_grad():
-        for batch_num, (x, utts, labels) in enumerate(test_loader):
-            x, utts, labels = x.to(device), utts, labels.to(device)
+    means, all_utts = collect_inferences(inference_net, test_loader)
+    run_pca(means, all_utts, False, []) # no tsne
+    run_pca(means, all_utts, True, [])  # yes tsne
 
-            # define q(z|x)
-            z_inf_mu, z_inf_logvar = inference_net(x) # note: x may not be appropriate shape
-            
-            if batch_num == 0:
-                all_utts = utts
-                means = z_inf_mu
-            else:
-                all_utts = np.concatenate((all_utts,utts))
-                means = torch.cat((means, z_inf_mu))
-
-    print("calculated PCA. plotting PCA.")
-    # plot PCA
-    means = means.cpu().data.numpy()
-    pca = PCA(n_components=2)
-    means = pca.fit_transform(means)
-   
-    utt_kinds = sorted(list(set(all_utts)), key=len)
-    colors = ["r", "y", "g", "b", "orange"]
-    plt.figure()
-    for i, kind in enumerate(utt_kinds):
-#        if (kind == "43" or kind == "causal43" or kind == ""): continue
-        means_i = means[all_utts == kind]
-        if (kind == ""): kind = "empty"
-        plt.scatter(means_i[:, 0], means_i[:, 1], color=colors[i], 
-                    label=kind, alpha=0.3, edgecolors='none')
-    plt.legend()
-    plt.savefig(os.path.join(args.out_dir, 'ALI_PCA{}.png'.format(arg_str)))
-    print("plotted PCA. now doing TSNE.")
-
-    tsne = TSNE(n_components=2, verbose=1, perplexity=40,n_iter=300)
-    means = tsne.fit_transform(means)
-    plt.figure()
-    for i, kind in enumerate(utt_kinds):
-#        if (kind == "43" or kind == "causal43" or kind == ""): continue
-        means_i = means[all_utts == kind]
-        if (kind == ""): kind = "empty"
-        plt.scatter(means_i[:, 0], means_i[:, 1], color=colors[i], 
-                    label=kind, alpha=0.3, edgecolors='none')
-    plt.legend()
-    plt.savefig(os.path.join(args.out_dir, 'ALI_TSNE{}.png'.format(arg_str)))
-    breakpoint()
+    print("finished PCA")
