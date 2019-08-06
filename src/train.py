@@ -86,9 +86,9 @@ def handle_args():
                         help="use WGAN instead of GAN")
     parser.add_argument("--train_on_mnist", action='store_true',
                         help="train on MNIST instead of CMNIST")
-    parser.add_argument("--using_gan", action='store_true')
-    parser.add_argument("--attach_classifier", action='store_true')
-    parser.add_argument("--attach_inference", action='store_true')
+    parser.add_argument("--gan", action='store_true')
+    parser.add_argument("--classifier", action='store_true')
+    parser.add_argument("--ali", action='store_true')
     parser.add_argument("--cf_inf", action='store_true')
     parser.add_argument("--sample_from", type=str, default="post")
     parser.add_argument("--gradual_wt", action='store_false')
@@ -98,12 +98,14 @@ def handle_args():
     args.cuda = args.cuda and torch.cuda.is_available()
 
     if (args.cf_inf):
-        args.attach_classifier = True
-        args.attach_inference = True
-    if (args.wass or args.attach_inference or args.attach_classifier):
-        args.using_gan = True
-    if (args.using_gan):
+        args.classifier = True
+        args.ali = True
+    if (args.wass or args.ali or args.classifier):
+        args.gan = True
+    if (args.gan):
         args.human_cf = False
+    else:
+        args.classifier = True
 
     args.time = datetime.datetime.now()
 
@@ -113,7 +115,7 @@ def handle_args():
 
 def load_checkpoint(folder, arg_str):
     filename = 'model_best{}.pth.tar'.format(arg_str)
-    checkpoint = torch.load(folder + filename)
+    checkpoint = torch.load(os.path.join(folder, filename))
     return checkpoint['epoch'], checkpoint['classifier_state'], checkpoint['generator_state'], checkpoint['inference_net_state'], checkpoint['tracker'], checkpoint['cached_args']
 
 def record_progress(epoch, epochs, batch_num, num_batches, tracker, kind, amt, batch_size, arg_str):
@@ -131,7 +133,7 @@ def save_losses(tracker, kind, args):
 
 def update_classifier_loss_weight(classifier_loss_weight, loss_wts, args):
     loss_wts.append(classifier_loss_weight)
-    np.savetxt(os.path.join(args.out_dir,"./progress_class_loss_wt_{}.txt".format(args_to_str(args))), loss_wts)
+    np.savetxt(os.path.join(args.out_dir,"./progress_class_loss_wt_{}.txt".format(args_to_string(args))), loss_wts)
 
     if (classifier_loss_weight < MAX_CLASS_WT and args.gradual_wt and epoch > START_INCREASE_CLASS_WT):
         return MAX_CLASS_WT*(1.0 if not args.wass else args.n_critic) / ((args.epochs-25.0)*len(train_loader))
@@ -224,10 +226,12 @@ def log_reg_run_batch(batch_num, num_batches, imgs, utts, labels, model, mode, e
 
         if (mode == "train"):
             descend([optimizer], loss)
+        else:
+            labels = labels.squeeze(1)
 
     if ( mode == "validate" or mode == "test"):
         test_outputs = np.rint(outputs.cpu().numpy().flatten())
-        test_labels = labels.squeeze(1).cpu().numpy()
+        test_labels = labels.cpu().numpy()
 
         test_losses(test_outputs, utts, test_labels, tracker, epoch, mode)
 
@@ -288,12 +292,12 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, args, optimiz
 
     # report loss
     if (mode=="test"):
-        print('====> test_total loss: \t\t\t {}%'.format(to_percent(avg_loss)))
+        print('====> test_total_loss: \t\t\t {}%'.format(to_percent(avg_loss)))
         for loss_kind in LOSS_KINDS:
             avg_loss_kind = tracker["test_" + loss_kind][epoch].avg
-            print('====> test_{} loss:\t\t {}%'.format(loss_kind, avg_loss_kind))
+            print('====> test_{}:\t\t {}%'.format(loss_kind, avg_loss_kind))
     else:
-        print('====> {} loss log reg \t(epoch {}):\t\t {:.4f}'.format(mode, epoch+1, avg_loss))
+        print('====> {} loss log reg \t\t(epoch {}):\t\t {:.4f}'.format(mode[:5], epoch+1, avg_loss))
 
     save_losses(tracker, "{}_loss_c".format(mode), args)
 
@@ -352,7 +356,7 @@ def combine_x_cf(x, z_inf, z_inf_mu, z_inf_sigma, sample_from, generator):
 
         # append x_cf to x_to_classify
         for i, img in enumerate(x_to_classify):
-            x_to_classify[i].append(x_cf[0].squeeze())
+            x_to_classify[i].append(x_cf[i].squeeze())
 
     x_to_classify = [torch.cat(cfs, 0).unsqueeze(0) for cfs in x_to_classify]
 
@@ -360,7 +364,7 @@ def combine_x_cf(x, z_inf, z_inf_mu, z_inf_sigma, sample_from, generator):
 
 # ANALYZING INFERENCE AFTER TESTING
 
-def collect_inferences(inference_net, test_loader)
+def collect_inferences(inference_net, test_loader):
     with torch.no_grad():
         for batch_num, (x, utts, labels) in enumerate(test_loader):
             x, utts, labels = x.to(device), utts, labels.to(device)
@@ -377,17 +381,18 @@ def collect_inferences(inference_net, test_loader)
 
         return means, all_utts
 
-def run_pca(means, all_utts, use_tsne, kinds_to_ignore)
+def run_pca(means, all_utts, use_tsne, kinds_to_ignore):
     means = means.cpu().data.numpy()
     pca = PCA(n_components=2)
     means = pca.fit_transform(means)
 
-    if tsne:
+    if use_tsne:
         tsne = TSNE(n_components=2, verbose=1, perplexity=40,n_iter=300)
         means = tsne.fit_transform(means)
 
+    colors = ["r", "y", "g", "b", "orange"]
     plt.figure()
-    for i, kind in enumerate(utt_kinds):
+    for i, kind in enumerate(sorted(set(all_utts), key=len)):
         if (kind in kinds_to_ignore): continue
         means_i = means[all_utts == kind]
         if (kind == ""): kind = "empty"
@@ -412,18 +417,18 @@ if __name__ == "__main__":
     # set up classifier, data loaders, loss tracker
     classifier = LogisticRegression(args.human_cf or args.cf_inf).to(device)
     optimizer_c = torch.optim.Adam(classifier.parameters(), lr=args.lr, betas=(args.b1, args.b2))
-    train_loader, valid_loader, test_loader = get_causal_mnist_loaders(args.using_gan, args.human_cf, args.transform, args.train_on_mnist)
+    train_loader, valid_loader, test_loader = get_causal_mnist_loaders(args.gan, args.human_cf, args.transform, args.train_on_mnist)
     tracker = LossTracker()
 
     # Option 1: linear classifier alone
-    if (not args.using_gan):
+    if (not args.gan):
         run_log_reg(classifier, optimizer_c, train_loader, valid_loader, test_loader, args, tracker)
         breakpoint()    # to prevent GAN from training
 
     # Option 2: (W)GAN + X (classifier, inference, training on generated cfs)
     generator = ConvGenerator(args.latent_dim, args.wass, args.train_on_mnist).to(device)
     inference_net = InferenceNet(1, 64, args.latent_dim).to(device)
-    discriminator = ConvDiscriminator(args.wass, args.train_on_mnist, args.attach_inference, args.latent_dim).to(device)
+    discriminator = ConvDiscriminator(args.wass, args.train_on_mnist, args.ali, args.latent_dim).to(device)
     loss_wts = []
 
     generator.train()
@@ -438,9 +443,9 @@ if __name__ == "__main__":
 
     print("set up models/optimizers. now training...")
 
-    if (args.attach_classifier): classifier_loss_weight = 0.0 if args.gradual_wt else MAX_CLASS_WT
+    if (args.classifier): classifier_loss_weight = 0.0 if args.gradual_wt else MAX_CLASS_WT
 
-    # train (and validate, if args.attach_classifier)
+    # train (and validate, if args.classifier)
     for epoch in range(args.epochs):
         pbar = tqdm(total = len(train_loader))
         # train
@@ -470,7 +475,7 @@ if __name__ == "__main__":
             x_g = generator(z_prior)
 
             # train discriminator
-            loss_d = get_loss_d(args.wass, discriminator, x, x_g, valid, fake, args.attach_inference, z_prior, z_inf)
+            loss_d = get_loss_d(args.wass, discriminator, x, x_g, valid, fake, args.ali, z_prior, z_inf)
             descend([optimizer_d], loss_d)
             record_progress(epoch, args.epochs, batch_num, len(train_loader), tracker, "train_loss_d", loss_d.item(), batch_size, arg_str)
 
@@ -488,12 +493,12 @@ if __name__ == "__main__":
 
                 if (batch_num == 0): save_imgs_from_g(x_g, epoch, args, False)
 
-                loss_g = get_loss_g(args.wass, discriminator, x, x_g, valid, args.attach_inference, z_prior, z_inf)
+                loss_g = get_loss_g(args.wass, discriminator, x, x_g, valid, args.ali, z_prior, z_inf)
                 record_progress(epoch, args.epochs, batch_num, len(train_loader), tracker, "train_loss_g", loss_g.item(), batch_size, arg_str)
                 total_loss = loss_g
                 optimizers = [optimizer_g]
 
-                if (args.attach_classifier):
+                if (args.classifier):
                     x_to_classify = x
                     
                     if (args.cf_inf):
@@ -516,12 +521,12 @@ if __name__ == "__main__":
         # finished training for epoch; print train loss, output images
         print('====> total train loss\t\t\t(epoch {}):\t {:.4f}'.format(epoch+1, tracker["train_loss_total"][epoch].avg))
         
-        # validate (if attach_classifier); this saves a checkpoint if the loss was especially good
-        if (args.attach_classifier):
+        # validate (if classifier); this saves a checkpoint if the loss was especially good
+        if (args.classifier):
             log_reg_run_epoch(valid_loader, classifier, "validate", epoch, args.epochs, tracker, args, generator=generator, inference_net=inference_net)
 
     # test
-    if (args.attach_classifier):
+    if (args.classifier):
         test_log_reg_from_checkpoint(test_loader, tracker, args)
 
     # PCA
@@ -539,3 +544,4 @@ if __name__ == "__main__":
     run_pca(means, all_utts, True, [])  # yes tsne
 
     print("finished PCA")
+    breakpoint()

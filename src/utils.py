@@ -25,17 +25,17 @@ def args_to_string(args):
     string = "["
     if (args.wass):
         string += "w"
-    if (args.using_gan):
-        string += "g"
-    if (args.attach_classifier):
-        string += "+c"
-    if (args.attach_inference):
-        string += "+i"
+    if (args.gan):
+        string += "g+"
+    if (args.classifier):
+        string += "c+"
+    if (args.ali):
+        string += "i+"
     if (args.cf_inf):
-        string += "+cf_from_{}".format(args.sample_from)
+        string += "cf_from_{}+".format(args.sample_from)
     if (args.human_cf):
-        string += "human_cfs"
-    string += "+e{}+{}".format(args.epochs, args.time)
+        string += "human_cfs+"
+    string += "e{}+{}".format(args.epochs, args.time).replace(" ", "+")
     string += "]"
     return string
 
