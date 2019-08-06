@@ -185,7 +185,7 @@ def log_reg_run_batch(batch_num, num_batches, imgs, utts, labels, model, mode, e
 
     outputs = model(imgs)
 
-    if (mode == "train" or mode == "validate")
+    if (mode == "train" or mode == "validate"):
         labels = labels.unsqueeze(1)
 
         # find loss
@@ -202,7 +202,7 @@ def log_reg_run_batch(batch_num, num_batches, imgs, utts, labels, model, mode, e
         test_losses(test_outputs, utts, test_labels, condition, tracker, epoch, mode)
 
         if mode == "test":
-            loss = (outputs == labels)
+            loss = (test_outputs == test_labels)
             loss_amt = np.mean(loss)
 
     # compute and check batch_size
@@ -256,7 +256,7 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, arg_str, opti
             'inference_net_state': inference_net_state,
             'tracker': tracker,
             'cached_args': args,
-        }, tracker.best_loss == avg_loss, folder = args.out_dir, arg_str)
+        }, tracker.best_loss == avg_loss, arg_str, folder = args.out_dir)
 
     # report loss
     if (mode=="test"):
@@ -318,15 +318,17 @@ def get_causal_mnist_loaders(using_gan, cf, transform, train_on_mnist):
 
     return train_loader, valid_loader, test_loader
 
-def save_imgs_from_g(imgs, epoch, wass, arg_str, cf_inf):
+def save_imgs_from_g(imgs, epoch, args, cfs):
     with torch.no_grad():
+        if (not cfs):
+            imgs = imgs.data
         n_imgs_per_row = 5
         n_images = n_imgs_per_row**2
 
         if epoch % 5 == 0:
-            title = "{}GAN {}after {} epochs {}.png".format("W" if args.wass else "", "cfs " if args.cf_inf else "", format(epoch, "04"), args_to_string(args))
+            title = "{}GAN {}after {} epochs {}.png".format("W" if args.wass else "", "cfs " if cfs else "", format(epoch, "04"), args_to_string(args))
             title = os.path.join(DATA_DIR, title)
-            save_image(gen_imgs.data[:n_images], title, nrow=n_imgs_per_row, normalize=True)
+            save_image(imgs[:n_images], title, nrow=n_imgs_per_row, normalize=True)
 
 def combine_x_cf(x, z_inf, z_inf_mu, z_inf_sigma, sample_from, generator):
     latent_dim = z_inf.size(1)
@@ -441,7 +443,7 @@ if __name__ == "__main__":
                 # x_g ~ p(x|z_prior)
                 x_g = generator(z_prior)
 
-                save_imgs_from_g(x_g, epoch, args)
+                save_imgs_from_g(x_g, epoch, args, False)
 
                 loss_g = get_loss_g(args.wass, discriminator, x, x_g, valid, args.attach_inference, z_prior, z_inf)
                 record_progress(epoch, args.epochs, batch_num, len(train_loader), tracker, "train_loss_g", loss_g.item(), batch_size, arg_str)
@@ -454,7 +456,7 @@ if __name__ == "__main__":
                     if (args.cf_inf):
                         # x_to_classify ~ q(x | cf(z_inf))
                         x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.sample_from, generator)
-                        save_imgs_from_g(x_to_classify, epoch, args)
+                        save_imgs_from_g(x_to_classify, epoch, args, True)
 
                     loss_c = log_reg_run_batch(batch_num, len(train_loader), x_to_classify, utts, labels, classifier, "train(+GAN)", epoch, args.epochs, tracker, arg_str)
                     total_loss += classifier_loss_weight*loss_c

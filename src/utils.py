@@ -126,14 +126,14 @@ class LossTracker():
     def __getitem__(self, kind):
         return self.loss_kinds[kind]
 
-def save_checkpoint(state, is_best, folder='./', arg_str):
+def save_checkpoint(state, is_best, arg_str, folder='./'):
     filename = 'checkpoint{}.pth.tar'.format(arg_str)
     if not os.path.isdir(folder):
         os.mkdir(folder)
     torch.save(state, os.path.join(folder, filename))
     if is_best:
         shutil.copyfile(os.path.join(folder, filename),
-                        os.path.join(folder, 'model_best{}.pth.tar'.format(arg_str))
+                        os.path.join(folder, 'model_best{}.pth.tar'.format(arg_str)))
 
 def free_params(module):
     for p in module.parameters(): p.requires_grad = True
