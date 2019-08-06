@@ -39,8 +39,8 @@ DATA_DIR = "/mnt/fs5/mmosse19/causal-gans/progress"
 START_INCREASE_CLASS_WT = 25
 MAX_CLASS_WT = 1.0
 SUPRESS_PRINT_STATEMENTS = True
-LOSS_KINDS = {  "causal_loss": lambda utt: "causal" in utt,                     # find loss on images labeled '1' (i.e., causal images)
-                "both_nums_loss": lambda utt: str(NUM1) in utt and str(NUM2) in utt}   # find loss on all images that contain both NUM1 and NUM2
+LOSS_KINDS = {  "causal_loss_c": lambda utt: "causal" in utt,                     # find loss on images labeled '1' (i.e., causal images)
+                "both_nums_loss_c": lambda utt: str(NUM1) in utt and str(NUM2) in utt}   # find loss on all images that contain both NUM1 and NUM2
 
 # ARGUMENTS; CHECKPOINTS AND PROGRESS WHILE TRAINING
 
@@ -112,19 +112,17 @@ def load_checkpoint(folder, arg_str):
     return checkpoint['epoch'], checkpoint['classifier_state'], checkpoint['generator_state'], checkpoint['inference_net_state'], checkpoint['tracker'], checkpoint['cached_args']
 
 def record_progress(epoch, epochs, batch_num, num_batches, tracker, kind, amt, batch_size, arg_str):
-    # update tracker
-    tracker.update(epoch, kind, amt, batch_size)
-
     # print avg for current epoch
-    loss = tracker[kind][epoch].avg
-    progress = "[epoch {}/{}]\t[batch {}/{}]\t[{} (epoch running avg):\t\t\t{}]".format(epoch+1, epochs, batch_num+1, num_batches, kind, loss)
-    
-    if (batch_num % 30 == 0) and not SUPRESS_PRINT_STATEMENTS: print(progress)
+    if (batch_num % 30 == 0) and not SUPRESS_PRINT_STATEMENTS:
+        loss = tracker[kind][epoch].avg
+        progress = "[epoch {}/{}]\t[batch {}/{}]\t[{} (epoch running avg):\t\t\t{}]".format(epoch+1, epochs, batch_num+1, num_batches, kind, loss)
+        print(progress)
 
+def save_losses(tracker, kind, arg_str):
     # save tracker loss avgs (for each epoch) to file
     num_epochs_with_data = len(tracker[kind])
-    data = [tracker[kind][e].avg for e in range(num_epochs_with_data)]
-    np.savetxt(os.path.join(DATA_DIR, "progress_{}_{}.txt".format(kind, arg_str)), data)
+    losses = [tracker[kind][e].avg for e in range(num_epochs_with_data)]
+    np.savetxt(os.path.join(DATA_DIR, "progress_{}_{}.txt".format(kind, arg_str)), losses)
 
 # TRAINING
 
@@ -166,11 +164,15 @@ def clip_discriminator(discriminator):
 
 # TRAINING FOR LOG REG
 
-def test_loss(loss_kind, outputs, utts, labels, condition, tracker, epoch):
+def test_loss(loss_kind, outputs, utts, labels, condition, tracker, epoch, mode):
     relevant_indices = np.where([condition(u) for u in utts])
-    loss = (outputs[relevant_indices] == labels[relevant_indices])
+    loss = (outputs[relevant_indices] != labels[relevant_indices])
     loss_amt = np.mean(loss)
-    tracker.update(epoch, "test_" + loss_kind, loss_amt, len(relevant_indices))
+    tracker.update(epoch, "{}_{}".format(mode, loss_kind), loss_amt, len(relevant_indices))
+
+def test_losses(outputs, utts, labels, condition, tracker, epoch, mode):
+    for loss_kind, condition in LOSS_KINDS.items():
+        test_loss(loss_kind, outputs, utts, labels, condition, tracker, epoch, mode)
 
 # single pass over all data
 def log_reg_run_batch(batch_num, num_batches, imgs, utts, labels, model, mode, epoch, epochs, tracker, arg_str, optimizer=None):
@@ -183,35 +185,33 @@ def log_reg_run_batch(batch_num, num_batches, imgs, utts, labels, model, mode, e
 
     outputs = model(imgs)
 
-    # if testing for accuracy, round outputs; else add dim to labels
-    if (mode == "test"):
-        outputs = np.rint(outputs.cpu().numpy().flatten())
-        labels = labels.cpu().numpy()
-    else:
+    if (mode == "train" or mode == "validate")
         labels = labels.unsqueeze(1)
 
-    # calculate loss, update tracker
-    if (mode == "test"):
-        # find loss on images labeled '1' (i.e., causal images)
-        for loss_kind, condition in LOSS_KINDS.items():
-            test_loss(loss_kind, outputs, utts, labels, condition, tracker, epoch)
-
-        # find total loss
-        loss = (outputs == labels)
-        loss_amt = np.mean(loss)
-    else:
         # find loss
         loss = model.criterion(outputs,labels)
         loss_amt = loss.item()
+
+        if (mode == "train"):
+            descend([optimizer], loss)
+
+    if (mode == "test" or mode == "validate"):
+        test_outputs = np.rint(outputs.cpu().numpy().flatten())
+        test_labels = labels.squeeze(1).cpu().numpy()
+
+        test_losses(test_outputs, utts, test_labels, condition, tracker, epoch, mode)
+
+        if mode == "test":
+            loss = (outputs == labels)
+            loss_amt = np.mean(loss)
 
     # compute and check batch_size
     batch_size = imgs.size(0) # don't use labels.size(0), bc if "test", labels are edited above
 
     # update tracker
-    record_progress(epoch, epochs, batch_num, num_batches, tracker, mode + "_loss_c", loss_amt, batch_size, arg_str)
+    tracker.update(epoch, "{}_loss_c".format(mode), loss_amt, batch_size)
+    record_progress(epoch, epochs, batch_num, num_batches, tracker, "{}_loss_c".format(mode), loss_amt, batch_size, arg_str)
 
-    # follow gradient
-    if (mode == "train"): descend([optimizer], loss)
     return loss
 
 def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, arg_str, optimizer, generator, inference_net, sample_from):
@@ -244,7 +244,7 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, arg_str, opti
     log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, arg_str, optimizer, generator, inference_net, sample_from)
     
     # get avg loss for this epoch, save best loss if validating
-    avg_loss = tracker[mode + "_loss_c"][epoch].avg
+    avg_loss = tracker["{}_loss_c".format(mode)][epoch].avg
 
     if (mode == "validate"):
         tracker.best_loss = min(avg_loss, tracker.best_loss)
@@ -258,19 +258,21 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, arg_str, opti
             'cached_args': args,
         }, tracker.best_loss == avg_loss, folder = args.out_dir, arg_str)
 
-        for loss_kind in LOSS_KINDS:
-            avg_loss = tracker["validate_" + loss_kind][epoch].avg
-            
-            np.savetxt(os.path.join(DATA_DIR, "validate_{}_{}.txt".format(kind, arg_str)), to_percent())
-
     # report loss
     if (mode=="test"):
-        print('====> test_total loss: \t\t\t {}%'.format(to_percent(1.0-avg_loss)))
+        print('====> test_total loss: \t\t\t {}%'.format(to_percent(avg_loss)))
         for loss_kind in LOSS_KINDS:
-            avg_loss = tracker["test_" + loss_kind][epoch].avg
-            print('====> test_{} loss:\t\t {}%'.format(loss_kind, to_percent(1.0-avg_loss)))
+            avg_loss_kind = tracker["test_" + loss_kind][epoch].avg
+            print('====> test_{} loss:\t\t {}%'.format(loss_kind, avg_loss_kind))
     else:
         print('====> {} loss log reg \t(epoch {}):\t\t {:.4f}'.format(mode, epoch+1, avg_loss))
+
+    save_losses(tracker, "{}_loss_c".format(mode), arg_str)
+
+    if (mode != "train"):
+        for loss_kind in LOSS_KINDS:
+            save_losses(tracker, "{}_{}".format(mode, loss_kind), arg_str)
+
     return avg_loss
 
 # train/test/validate log reg
@@ -316,19 +318,13 @@ def get_causal_mnist_loaders(using_gan, cf, transform, train_on_mnist):
 
     return train_loader, valid_loader, test_loader
 
-def save_images_from_g(generator, epoch, wass, latent_dim, batch_size, arg_str):
+def save_imgs_from_g(imgs, epoch, wass, arg_str, cf_inf):
     with torch.no_grad():
-        # z ~ N(0,1)
-        z = torch.randn(batch_size, latent_dim, device=device)
-
-        # generate (batch_size) images
-        gen_imgs = generator(z)
-
         n_imgs_per_row = 5
         n_images = n_imgs_per_row**2
 
         if epoch % 5 == 0:
-            title = "{}GAN after {} epochs {}.png".format("W" if wass else "", format(epoch, "04"), arg_str)
+            title = "{}GAN {}after {} epochs {}.png".format("W" if args.wass else "", "cfs " if args.cf_inf else "", format(epoch, "04"), args_to_string(args))
             title = os.path.join(DATA_DIR, title)
             save_image(gen_imgs.data[:n_images], title, nrow=n_imgs_per_row, normalize=True)
 
@@ -445,6 +441,8 @@ if __name__ == "__main__":
                 # x_g ~ p(x|z_prior)
                 x_g = generator(z_prior)
 
+                save_imgs_from_g(x_g, epoch, args)
+
                 loss_g = get_loss_g(args.wass, discriminator, x, x_g, valid, args.attach_inference, z_prior, z_inf)
                 record_progress(epoch, args.epochs, batch_num, len(train_loader), tracker, "train_loss_g", loss_g.item(), batch_size, arg_str)
                 total_loss = loss_g
@@ -456,6 +454,7 @@ if __name__ == "__main__":
                     if (args.cf_inf):
                         # x_to_classify ~ q(x | cf(z_inf))
                         x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.sample_from, generator)
+                        save_imgs_from_g(x_to_classify, epoch, args)
 
                     loss_c = log_reg_run_batch(batch_num, len(train_loader), x_to_classify, utts, labels, classifier, "train(+GAN)", epoch, args.epochs, tracker, arg_str)
                     total_loss += classifier_loss_weight*loss_c
@@ -474,7 +473,6 @@ if __name__ == "__main__":
         pbar.close()
         # finished training for epoch; print train loss, output images
         print('====> total train loss\t\t\t(epoch {}):\t {:.4f}'.format(epoch+1, tracker["train_loss_total"][epoch].avg))
-        save_images_from_g(generator, epoch+1, args.wass, args.latent_dim, args.batch_size, arg_str)
         
         # validate (if attach_classifier); this saves a checkpoint if the loss was especially good
         if (args.attach_classifier):
@@ -508,7 +506,7 @@ if __name__ == "__main__":
                 all_utts = np.concatenate((all_utts,utts))
                 means = torch.cat((means, z_inf_mu))
 
-    print("finished PCA. plotting PCA.")
+    print("calculated PCA. plotting PCA.")
     # plot PCA
     means = means.cpu().data.numpy()
     pca = PCA(n_components=2)
