@@ -236,7 +236,7 @@ def log_reg_run_batch(batch_num, num_batches, imgs, utts, labels, model, mode, e
         test_losses(test_outputs, utts, test_labels, tracker, epoch, mode)
 
         if mode == "test":
-            loss = (test_outputs == test_labels)
+            loss = (test_outputs != test_labels)
             loss_amt = np.mean(loss)
 
     # update tracker
@@ -295,7 +295,7 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, args, optimiz
         print('====> test_total_loss: \t\t\t {}%'.format(to_percent(avg_loss)))
         for loss_kind in LOSS_KINDS:
             avg_loss_kind = tracker["test_" + loss_kind][epoch].avg
-            print('====> test_{}:\t\t {}%'.format(loss_kind, avg_loss_kind))
+            print('====> test_{}:\t\t {}%'.format(loss_kind, to_percent(avg_loss_kind)))
     else:
         print('====> {} loss log reg \t\t(epoch {}):\t\t {:.4f}'.format(mode[:5], epoch+1, avg_loss))
 
