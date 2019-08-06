@@ -1,4 +1,3 @@
-import datetime
 import os
 import torch
 import shutil
@@ -33,10 +32,10 @@ def args_to_string(args):
     if (args.attach_inference):
         string += "+i"
     if (args.cf_inf):
-        string += "+cf from {}".format(args.sample_from)
+        string += "+cf_from_{}".format(args.sample_from)
     if (args.human_cf):
-        string += "human cfs"
-    string += "-e{}-{}".format(args.epochs, datetime.datetime.now())
+        string += "human_cfs"
+    string += "+e{}+{}".format(args.epochs, args.time)
     string += "]"
     return string
 
