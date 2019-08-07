@@ -230,7 +230,7 @@ def log_reg_run_batch(batch_num, num_batches, imgs, utts, labels, model, mode, e
 
         if (mode == "train"):
             descend([optimizer], loss)
-        else:
+        elif (mode == "validate"):
             labels = labels.squeeze(1)
 
     if ( mode == "validate" or mode == "test"):
@@ -253,7 +253,9 @@ def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, arg_str
     for batch_num, (x, utts, labels) in enumerate(loader):
         x, utts, labels = x.to(device), utts, labels.to(device)
         x_to_classify = x
-        if (model.cf and x_to_classify.shape[3] == IMG_DIM):
+
+        if (model.cf and x_to_classify.shape[3] == IMG_DIM): # TODO: remove this if
+            print("USING INFERENCE ON GENERATED CFS") # TODO delete this
             # define q(z|x)
             z_inf_mu, z_inf_logvar = inference_net(x)
 
@@ -263,11 +265,12 @@ def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, arg_str
             # x_to_classify ~ q(x | cf(z_inf))
             x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), sample_from, generator)
 
-        if (mode == "train"):
-            log_reg_run_batch(batch_num, len(loader), x_to_classify, utts, labels, model, mode, epoch, epochs, tracker, arg_str, optimizer)
-        else:
-            with torch.no_grad():
-                log_reg_run_batch(batch_num, len(loader), x_to_classify, utts, labels, model, mode, epoch, epochs, tracker, arg_str)
+        if not args.wass or batch_num % args.n_critic == 0:
+            if (mode == "train"):
+                log_reg_run_batch(batch_num, len(loader), x_to_classify, utts, labels, model, mode, epoch, epochs, tracker, arg_str, optimizer)
+            else:
+                with torch.no_grad():
+                    log_reg_run_batch(batch_num, len(loader), x_to_classify, utts, labels, model, mode, epoch, epochs, tracker, arg_str)
 
 # model is log reg model
 def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, args, optimizer = None, generator=None, inference_net=None):
@@ -507,18 +510,16 @@ if __name__ == "__main__":
                         # x_to_classify ~ q(x | cf(z_inf))
                         x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.sample_from, generator)
                         if (batch_num == 0): save_imgs_from_g(x_to_classify, epoch, args, True)
-
-                    loss_c = log_reg_run_batch(batch_num, len(train_loader), x_to_classify, utts, labels, classifier, "train(+GAN)", epoch, args.epochs, tracker, arg_str)
+                    
+                    mode = "train{}".format("(+GAN)" if args.cf_inf else "")
+                    loss_c = log_reg_run_batch(batch_num, len(train_loader), x_to_classify, utts, labels, classifier, mode, epoch, args.epochs, tracker, arg_str, optimizer=optimizer_c)
                     
                     if (args.cf_inf):
                         total_loss += classifier_loss_weight*loss_c
                         classifier_loss_weight += update_classifier_loss_weight(classifier_loss_weight, loss_wts, args)
                         optimizers.append(optimizer_c)
 
-                    else:
-                        descend([optimizer_c], loss_c)
-                     
-                descend(optimizers, total_loss)
+#`                descend(optimizers, total_loss)
                 tracker.update(epoch, "train_loss_total", total_loss.item(), batch_size)
 
             pbar.update()
