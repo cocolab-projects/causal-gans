@@ -301,7 +301,7 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, args, optimiz
             avg_loss_kind = tracker["test_" + loss_kind][epoch].avg
             print('====> test_{}:\t\t {}%'.format(loss_kind, to_percent(avg_loss_kind)))
     else:
-        print('====> {} loss log reg \t\t(epoch {}):\t\t {:.4f}'.format(mode[:5], epoch+1, avg_loss))
+        print('====> {} loss log reg \t(epoch {}):\t {:.4f}'.format(mode[:5], epoch+1, avg_loss))
 
     save_losses(tracker, "{}_loss_c".format(mode), args)
 
@@ -511,12 +511,12 @@ if __name__ == "__main__":
                     loss_c = log_reg_run_batch(batch_num, len(train_loader), x_to_classify, utts, labels, classifier, "train(+GAN)", epoch, args.epochs, tracker, arg_str)
                     
                     if (args.cf_inf):
-	                    total_loss += classifier_loss_weight*loss_c
-	                    classifier_loss_weight += update_classifier_loss_weight(classifier_loss_weight, loss_wts, args)
-		                optimizers.append(optimizer_c)
+                        total_loss += classifier_loss_weight*loss_c
+                        classifier_loss_weight += update_classifier_loss_weight(classifier_loss_weight, loss_wts, args)
+                        optimizers.append(optimizer_c)
 
-		       		else:
-		       			descend([optimizer_c], loss_c)
+                    else:
+                        descend([optimizer_c], loss_c)
                      
                 descend(optimizers, total_loss)
                 tracker.update(epoch, "train_loss_total", total_loss.item(), batch_size)
@@ -524,7 +524,7 @@ if __name__ == "__main__":
             pbar.update()
         pbar.close()
         # finished training for epoch; print train loss, output images
-        print('====> total train loss\t\t\t(epoch {}):\t {:.4f}'.format(epoch+1, tracker["train_loss_total"][epoch].avg))
+        print('====> total train loss\t\t(epoch {}):\t {:.4f}'.format(epoch+1, tracker["train_loss_total"][epoch].avg))
         
         # validate (if classifier); this saves a checkpoint if the loss was especially good
         if (args.classifier):
