@@ -186,12 +186,19 @@ def clip_discriminator(discriminator):
     for p in discriminator.parameters():
         p.data.clamp_(-args.clip_value,args.clip_value)
 
+# SETTING UP MODEL PARAMS FOR TESTING AND TRAINING
+
 def set_params(all_models, models_to_free):
     for model in all_models:
         if model in models_to_free:
             free_params(model)
         else:
             frozen_params(model)
+
+def set_mode(models, mode):
+	for model in models:
+		if (mode == "eval"): model.eval()
+		elif ("train" in mode): model.train()
 
 # TRAINING FOR LOG REG
 
@@ -210,10 +217,7 @@ def log_reg_run_batch(batch_num, num_batches, imgs, utts, labels, model, mode, e
     labels = labels.float()
     batch_size = imgs.size(0)
 
-    if ("train" in mode):
-        model.train()
-    else:
-        model.eval()
+    set_mode([model], mode)
 
     outputs = model(imgs)
 
@@ -431,10 +435,7 @@ if __name__ == "__main__":
     discriminator = ConvDiscriminator(args.wass, args.train_on_mnist, args.ali, args.latent_dim).to(device)
     loss_wts = []
 
-    generator.train()
-    discriminator.train()
-    inference_net.train()
-    classifier.train()
+    set_mode([generator, discriminator, inference_net, classifier], "train")
     
     optimizer_g = generator.optimizer(chain(generator.parameters(),
                                             inference_net.parameters()),
@@ -498,6 +499,7 @@ if __name__ == "__main__":
                 total_loss = loss_g
                 optimizers = [optimizer_g]
 
+                # TODO: clean this up; I'm just trying to make sure WGAN + ALI + classifier doesn't work anymore
                 if (args.classifier):
                     x_to_classify = x
                     
@@ -507,11 +509,14 @@ if __name__ == "__main__":
                         if (batch_num == 0): save_imgs_from_g(x_to_classify, epoch, args, True)
 
                     loss_c = log_reg_run_batch(batch_num, len(train_loader), x_to_classify, utts, labels, classifier, "train(+GAN)", epoch, args.epochs, tracker, arg_str)
-                    total_loss += classifier_loss_weight*loss_c
                     
-                    classifier_loss_weight += update_classifier_loss_weight(classifier_loss_weight, loss_wts, args)
+                    if (args.cf_inf):
+	                    total_loss += classifier_loss_weight*loss_c
+	                    classifier_loss_weight += update_classifier_loss_weight(classifier_loss_weight, loss_wts, args)
+		                optimizers.append(optimizer_c)
 
-                optimizers.append(optimizer_c)
+		       		else:
+		       			descend([optimizer_c], loss_c)
                      
                 descend(optimizers, total_loss)
                 tracker.update(epoch, "train_loss_total", total_loss.item(), batch_size)
@@ -536,8 +541,7 @@ if __name__ == "__main__":
     generator.load_state_dict(generator_state)
     inference_net.load_state_dict(inference_net_state)
 
-    generator.eval()
-    inference_net.eval()
+    set_mode([generator, inference_net], "eval")
 
     means, all_utts = collect_inferences(inference_net, test_loader)
     run_pca(means, all_utts, False, []) # no tsne
