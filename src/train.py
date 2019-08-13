@@ -174,7 +174,6 @@ def get_loss_g(wass, discriminator, x, x_g, valid, attach_inference, z_prior, z_
     elif (wass):
         return -torch.mean(discriminator(x_g))
     else:
-        print("wass and attach_inference are both false")
         return discriminator.criterion(discriminator(x_g), valid)
 
 def clip_discriminator(discriminator):
@@ -194,6 +193,7 @@ def set_mode(models, mode):
     for model in models:
         if (mode == "validate" or mode == "test"): model.eval()
         elif ("train" in mode): model.train()
+        else: RuntimeError("set_mode was expecting mode to be 'train', 'validate', or 'test'.")
 
 # TRAINING FOR LOG REG
 
@@ -211,8 +211,6 @@ def test_losses(outputs, utts, labels, tracker, epoch, mode):
 def log_reg_run_batch(batch_num, num_batches, imgs, utts, labels, model, mode, epoch, epochs, tracker, arg_str):
     labels = labels.float()
     batch_size = imgs.size(0)
-
-    set_mode([model], mode)
 
     outputs = model(imgs)
 
@@ -243,6 +241,9 @@ def log_reg_run_batch(batch_num, num_batches, imgs, utts, labels, model, mode, e
 
 def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, args, optimizer, generator, inference_net, sample_from):
     arg_str = args_to_string(args)
+
+    set_mode([model], mode)
+    set_params([model], [model] if mode == "train" else [])
     for batch_num, (x, utts, labels) in enumerate(loader):
         if (batch_num % args.n_critic == 0): continue
         x, utts, labels = x.to(device), utts, labels.to(device)
@@ -258,14 +259,10 @@ def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, args, o
             # x_to_classify ~ q(x | cf(z_inf))
             x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), sample_from, generator)
 
-        if (mode == "train"):
-            loss = log_reg_run_batch(batch_num, len(loader), x_to_classify, utts, labels, model, mode, epoch, epochs, tracker, arg_str)
+        log_reg_run_batch(batch_num, len(loader), x_to_classify, utts, labels, model, mode, epoch, epochs, tracker, arg_str)
 
-            descend([optimizer], loss)
-        else:
-            with torch.no_grad():
-                log_reg_run_batch(batch_num, len(loader), x_to_classify, utts, labels, model, mode, epoch, epochs, tracker, arg_str)
-
+        if (mode == "train"): descend([optimizer], loss)
+    
 # model is log reg model
 def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, args, optimizer = None, generator=None, inference_net=None):
     # run all batches
@@ -310,9 +307,24 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, args, optimiz
 # train/test/validate log reg
 def run_log_reg(model, optimizer, train_loader, valid_loader, test_loader, args, tracker):
     for epoch in range(int(args.epochs)):
+        """
+        temp train loop:
+        for batch_num, (x, utts, labels) in enumerate(loader):
+            if (batch_num % args.n_critic == 0): continue
+            x, utts, labels = x.to(device), utts, labels.to(device)
+            set_params([model], [model])
+            x_to_classify = x
+            loss = log_reg_run_batch(batch_num, len(loader), x_to_classify, utts, labels, model, mode, epoch, epochs, tracker, arg_str)
+
+            descend([optimizer], loss)
+            tracker.update("train_loss_c", )
+        print('====> total train loss\t\t(epoch {}):\t {:.4f}'.format(epoch+1, tracker["train_loss_total"][epoch].avg))
+        """
         log_reg_run_epoch(train_loader, model, "train", epoch, args.epochs, tracker, args, optimizer=optimizer)
         log_reg_run_epoch(valid_loader, model, "validate", epoch, args.epochs, tracker, args)
 
+    set_mode([classifier], "test")
+    set_params([classifier], [])
     test_log_reg_from_checkpoint(test_loader, tracker, args)
 
 def test_log_reg_from_checkpoint(test_loader, tracker, args):
@@ -410,7 +422,7 @@ if __name__ == "__main__":
     torch.cuda.manual_seed(args.seed)
 
     arg_str = args_to_string(args)
-    print("args: " + arg_str)
+    print("args:{}".format(arg_str))
 
     # set up classifier, data loaders, loss tracker
     classifier = LogisticRegression(args.human_cf or args.cf_inf).to(device)
@@ -420,7 +432,6 @@ if __name__ == "__main__":
 
     # Option 1: linear classifier alone
     if (not args.gan):
-        print("running log reg, with n_critic periodicity and loss wt 1 throughout.")
         run_log_reg(classifier, optimizer_c, train_loader, valid_loader, test_loader, args, tracker)
         breakpoint()    # to prevent GAN from training
 
@@ -429,8 +440,6 @@ if __name__ == "__main__":
     inference_net = InferenceNet(1, 64, args.latent_dim).to(device)
     discriminator = ConvDiscriminator(args.wass, args.train_on_mnist, args.ali, args.latent_dim).to(device)
     loss_wts = []
-
-    set_mode([generator, discriminator, inference_net, classifier], "train")
     
     optimizer_g = generator.optimizer(chain(generator.parameters(),
                                             inference_net.parameters()),
@@ -443,6 +452,7 @@ if __name__ == "__main__":
 
     # train (and validate, if args.classifier)
     for epoch in range(args.epochs):
+        set_mode([generator, discriminator, inference_net, classifier], "train")
         pbar = tqdm(total = len(train_loader))
         # train
         for batch_num, (x, utts, labels) in enumerate(train_loader):
@@ -517,20 +527,24 @@ if __name__ == "__main__":
         
         # validate (if classifier); this saves a checkpoint if the loss was especially good
         if (args.classifier):
+            set_mode([classifier, generator, inference_net, discriminator], "validate")
             log_reg_run_epoch(valid_loader, classifier, "validate", epoch, args.epochs, tracker, args, generator=generator, inference_net=inference_net)
 
-    # test
+    # TESTING
+
+    set_mode([classifier, generator, inference_net, discriminator], "test")
+    set_params([classifier, generator, inference_net, discriminator], [])
+
+    # classifier: accuracy
     if (args.classifier):
         test_log_reg_from_checkpoint(test_loader, tracker, args)
 
-    # PCA
+    # ali: pca
     print("finished testing. running PCA.")
     epoch, classifier_state, generator_state, inference_net_state, tracker, cached_args = load_checkpoint(args.out_dir, arg_str)
 
     generator.load_state_dict(generator_state)
     inference_net.load_state_dict(inference_net_state)
-
-    set_mode([generator, inference_net], "test")
 
     means, all_utts = collect_inferences(inference_net, test_loader)
     run_pca(means, all_utts, False, []) # no tsne
