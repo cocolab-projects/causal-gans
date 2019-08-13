@@ -1,6 +1,8 @@
 """
 train.py
 
+TODO: record the different kinds of losses; rename checkpoint to model_most_recent; make it const. then train.
+
 Much credit for GAN training goes to eriklindernoren, mhw32
 
 @author mmosse19
@@ -118,13 +120,6 @@ def load_checkpoint(folder, arg_str):
     checkpoint = torch.load(os.path.join(folder, filename))
     return checkpoint['epoch'], checkpoint['classifier_state'], checkpoint['generator_state'], checkpoint['inference_net_state'], checkpoint['tracker'], checkpoint['cached_args']
 
-def record_progress(epoch, epochs, batch_num, num_batches, tracker, kind, amt, batch_size, arg_str):
-    # print avg for current epoch
-    if (batch_num % 30 == 0) and not SUPRESS_PRINT_STATEMENTS:
-        loss = tracker[kind][epoch].avg
-        progress = "[epoch {}/{}]\t[batch {}/{}]\t[{} (epoch running avg):\t\t\t{}]".format(epoch+1, epochs, batch_num+1, num_batches, kind, loss)
-        print(progress)
-
 def save_losses(tracker, kind, args):
     # save tracker loss avgs (for each epoch) to file
     num_epochs_with_data = len(tracker[kind])
@@ -213,7 +208,7 @@ def test_losses(outputs, utts, labels, tracker, epoch, mode):
         test_loss(loss_kind, outputs, utts, labels, condition, tracker, epoch, mode)
 
 # single pass over all data
-def log_reg_run_batch(batch_num, num_batches, imgs, utts, labels, model, mode, epoch, epochs, tracker, arg_str, optimizer=None):
+def log_reg_run_batch(batch_num, num_batches, imgs, utts, labels, model, mode, epoch, epochs, tracker, arg_str):
     labels = labels.float()
     batch_size = imgs.size(0)
 
@@ -221,16 +216,14 @@ def log_reg_run_batch(batch_num, num_batches, imgs, utts, labels, model, mode, e
 
     outputs = model(imgs)
 
-    if "train" in mode or mode == "validate":
+    if mode == "train" or mode == "validate":
         labels = labels.unsqueeze(1)
 
         # find loss
         loss = model.criterion(outputs,labels)
         loss_amt = loss.item()
 
-        if (mode == "train"):
-            descend([optimizer], loss)
-        elif (mode == "validate"):
+        if (mode == "validate"):
             labels = labels.squeeze(1)
 
     if mode == "validate" or mode == "test":
@@ -245,7 +238,6 @@ def log_reg_run_batch(batch_num, num_batches, imgs, utts, labels, model, mode, e
 
     # update tracker
     tracker.update(epoch, "{}_loss_c".format(mode), loss_amt, batch_size)
-    record_progress(epoch, epochs, batch_num, num_batches, tracker, "{}_loss_c".format(mode), loss_amt, batch_size, arg_str)
     return loss
 
 
@@ -265,7 +257,8 @@ def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, arg_str
             x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), sample_from, generator)
 
         if (mode == "train"):
-            log_reg_run_batch(batch_num, len(loader), x_to_classify, utts, labels, model, mode, epoch, epochs, tracker, arg_str, optimizer)
+            loss = log_reg_run_batch(batch_num, len(loader), x_to_classify, utts, labels, model, mode, epoch, epochs, tracker, arg_str)
+            descend([optimizer], loss)
         else:
             with torch.no_grad():
                 log_reg_run_batch(batch_num, len(loader), x_to_classify, utts, labels, model, mode, epoch, epochs, tracker, arg_str)
@@ -273,7 +266,7 @@ def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, arg_str
 # model is log reg model
 def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, args, optimizer = None, generator=None, inference_net=None):
     # run all batches
-    log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, args_string(args), optimizer, generator, inference_net, args.sample_from)
+    log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, args_to_string(args), optimizer, generator, inference_net, args.sample_from)
     
     # get avg loss for this epoch, save best loss if validating
     avg_loss = tracker["{}_loss_c".format(mode)][epoch].avg
@@ -292,7 +285,7 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, args, optimiz
             'inference_net_state': inference_net_state,
             'tracker': tracker,
             'cached_args': args,
-        }, tracker.best_loss == avg_loss, args_string(args), folder = args.out_dir)
+        }, tracker.best_loss == avg_loss, args_to_string(args), folder = args.out_dir)
 
     # report loss
     if (mode=="test"):
@@ -411,6 +404,7 @@ if __name__ == "__main__":
     device = torch.device('cuda' if args.cuda else 'cpu')
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
 
     arg_str = args_to_string(args)
     print("args: " + arg_str)
@@ -432,7 +426,7 @@ if __name__ == "__main__":
     discriminator = ConvDiscriminator(args.wass, args.train_on_mnist, args.ali, args.latent_dim).to(device)
     loss_wts = []
 
-    set_mode([generator, discriminator, inference_net, classifier], "validate") # TODO: change "eval" to "train"
+    set_mode([generator, discriminator, inference_net, classifier], "train")
     
     optimizer_g = generator.optimizer(chain(generator.parameters(),
                                             inference_net.parameters()),
@@ -475,7 +469,6 @@ if __name__ == "__main__":
             # train discriminator
             loss_d = get_loss_d(args.wass, discriminator, x, x_g, valid, fake, args.ali, z_prior, z_inf)
             descend([optimizer_d], loss_d)
-            record_progress(epoch, args.epochs, batch_num, len(train_loader), tracker, "train_loss_d", loss_d.item(), batch_size, arg_str)
 
             # clip discriminator if wass
             if (args.wass): clip_discriminator(discriminator)
@@ -492,7 +485,6 @@ if __name__ == "__main__":
                 if (batch_num == 0): save_imgs_from_g(x_g, epoch, args, False)
 
                 loss_g = get_loss_g(args.wass, discriminator, x, x_g, valid, args.ali, z_prior, z_inf)
-                record_progress(epoch, args.epochs, batch_num, len(train_loader), tracker, "train_loss_g", loss_g.item(), batch_size, arg_str)
                 total_loss = loss_g
                 optimizers = [optimizer_g]
 
@@ -504,7 +496,7 @@ if __name__ == "__main__":
                         x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.sample_from, generator)
                         if (batch_num == 0): save_imgs_from_g(x_to_classify, epoch, args, True)
                     
-                    loss_c = log_reg_run_batch(batch_num, len(train_loader), x_to_classify, utts, labels, classifier, "train(+GAN)", epoch, args.epochs, tracker, arg_str, optimizer=optimizer_c)
+                    loss_c = log_reg_run_batch(batch_num, len(train_loader), x_to_classify, utts, labels, classifier, "train", epoch, args.epochs, tracker, arg_str)
                     
                     total_loss += classifier_loss_weight*loss_c
                     classifier_loss_weight += update_classifier_loss_weight(classifier_loss_weight, loss_wts, args)
@@ -512,7 +504,7 @@ if __name__ == "__main__":
 
                 descend(optimizers, total_loss)
                 tracker.update(epoch, "train_loss_total", total_loss.item(), batch_size)
-
+            save_losses(tracker, "train_loss_total", args)
             pbar.update()
         pbar.close()
         # finished training for epoch; print train loss, output images

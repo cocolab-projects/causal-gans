@@ -28,8 +28,7 @@ VAL_PORTION = .2
 TRAIN_PORTION = 1.0 - VAL_PORTION
 
 # number of square images to generate
-GAN_DATA_LEN = 11000
-LOG_REG_DATA_LEN = 1200
+DATA_LEN = 11000
 
 DATA_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), "../data")
 CAUSAL_MNIST_DIR = os.path.join(DATA_DIR, 'causal_mnist')
@@ -44,8 +43,6 @@ class CausalMNIST(Dataset):
         self.train_on_mnist = train_on_mnist
         self.img_transform = transforms.ToTensor()
 
-        causal_data_len = GAN_DATA_LEN if using_gan else LOG_REG_DATA_LEN
-
         # if not test, then get length, to split train dataset into train/val
         if (split != "test"):
             mnist_data_len = len(self.mnist["labels"])
@@ -53,20 +50,20 @@ class CausalMNIST(Dataset):
 
         # set self.length, self.mnist
         if (split == "train"):
-            self.length = int(causal_data_len*TRAINVAL_PORTION*TRAIN_PORTION)
+            self.length = int(DATA_LEN*TRAINVAL_PORTION*TRAIN_PORTION)
 
             start, end = 0, int(mnist_data_len*TRAIN_PORTION)
             self.mnist["labels"] = self.mnist["labels"][start:end]
             self.mnist["digits"] = self.mnist["digits"][start:end]
 
         elif (split == "validate"):
-            self.length = int(causal_data_len*TRAINVAL_PORTION*VAL_PORTION)
+            self.length = int(DATA_LEN*TRAINVAL_PORTION*VAL_PORTION)
 
             start, end = int(mnist_data_len*TRAIN_PORTION), mnist_data_len
             self.mnist["labels"] = self.mnist["labels"][start:end]
             self.mnist["digits"] = self.mnist["digits"][start:end]
         elif (split == "test"):
-            self.length = int(causal_data_len*TEST_PORTION)
+            self.length = int(DATA_LEN*TEST_PORTION)
         else:
             raise RuntimeError("CausalMNIST was expecting split to be 'train', 'validate', or 'test'.")
 
