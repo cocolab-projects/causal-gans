@@ -38,6 +38,7 @@ def warp(img, A, B):
     for old_x in range(MNIST_IMG_DIM):
         for y in range(MNIST_IMG_DIM):
             x = int(old_x + A *np.sin(2.0 * np.pi  * y / B))
+            if (x < 0): x = 0
             new_img[x][y] = img[old_x][y]
     return new_img
 
@@ -86,7 +87,9 @@ def img_of_world(world, num1_img, num2_img, transform):
     # apply nonlinear transformations; note that pixels are in interval [0,1]
     if (transform) and (world["C"] and world["cE"]):
         top_left = warp(top_left, 1, 1)
-        top_left = clamp_img(top_left, MNIST_MIN_COLOR, MNIST_MAX_COLOR)
+    elif (transform):
+        top_left = warp(top_left, .01, .01)
+    top_left = clamp_img(top_left, MNIST_MIN_COLOR, MNIST_MAX_COLOR)
 
     # put all four corner images together
     img = np.concatenate((np.concatenate((top_left, BLK_SQR), axis=1),

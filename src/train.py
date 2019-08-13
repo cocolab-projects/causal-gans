@@ -93,7 +93,7 @@ def handle_args():
     parser.add_argument("--ali", action='store_true')
     parser.add_argument("--cf_inf", action='store_true')
     parser.add_argument("--sample_from", type=str, default="post")
-    parser.add_argument("--gradual_wt", action='store_false')
+    parser.add_argument("--gradual_wt", action='store_true')
 
     args = parser.parse_args()
 
@@ -241,8 +241,10 @@ def log_reg_run_batch(batch_num, num_batches, imgs, utts, labels, model, mode, e
     return loss
 
 
-def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, arg_str, optimizer, generator, inference_net, sample_from):
+def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, args, optimizer, generator, inference_net, sample_from):
+    arg_str = args_to_string(args)
     for batch_num, (x, utts, labels) in enumerate(loader):
+        if (batch_num % args.n_critic == 0): continue
         x, utts, labels = x.to(device), utts, labels.to(device)
         x_to_classify = x
 
@@ -258,6 +260,7 @@ def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, arg_str
 
         if (mode == "train"):
             loss = log_reg_run_batch(batch_num, len(loader), x_to_classify, utts, labels, model, mode, epoch, epochs, tracker, arg_str)
+
             descend([optimizer], loss)
         else:
             with torch.no_grad():
@@ -266,7 +269,7 @@ def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, arg_str
 # model is log reg model
 def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, args, optimizer = None, generator=None, inference_net=None):
     # run all batches
-    log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, args_to_string(args), optimizer, generator, inference_net, args.sample_from)
+    log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, args, optimizer, generator, inference_net, args.sample_from)
     
     # get avg loss for this epoch, save best loss if validating
     avg_loss = tracker["{}_loss_c".format(mode)][epoch].avg
@@ -417,6 +420,7 @@ if __name__ == "__main__":
 
     # Option 1: linear classifier alone
     if (not args.gan):
+        print("running log reg, with n_critic periodicity and loss wt 1 throughout.")
         run_log_reg(classifier, optimizer_c, train_loader, valid_loader, test_loader, args, tracker)
         breakpoint()    # to prevent GAN from training
 
@@ -442,12 +446,10 @@ if __name__ == "__main__":
         pbar = tqdm(total = len(train_loader))
         # train
         for batch_num, (x, utts, labels) in enumerate(train_loader):
-            x, utts, labels = x.to(device), utts, labels.to(device)
-            # x.shape = (64, 1, 64, 64)
+            x, utts, labels = x.to(device), utts, labels.to(device) # x.shape = (64, 1, 64, 64)
             batch_size = x.size(0)
-
-            optimizer_d.zero_grad()
-
+            
+            """
             set_params([generator, inference_net, classifier, discriminator], [discriminator])
 
             # adversarial ground truths
@@ -469,42 +471,45 @@ if __name__ == "__main__":
             # train discriminator
             loss_d = get_loss_d(args.wass, discriminator, x, x_g, valid, fake, args.ali, z_prior, z_inf)
             descend([optimizer_d], loss_d)
+            tracker.update(epoch, "train_loss_d", loss_d.item(), batch_size)
 
             # clip discriminator if wass
             if (args.wass): clip_discriminator(discriminator)
-
+            """
             # train generator (and classifier if necessary); execute unconditionally if GAN and periodically if WGAN
             if not args.wass or batch_num % args.n_critic == 0:
-                optimizer_g.zero_grad() # is this necessary? gets called in descend
 
                 set_params([generator, inference_net, classifier, discriminator], [generator, inference_net, classifier])
-
+                """
                 # x_g ~ p(x|z_prior)
                 x_g = generator(z_prior)
 
                 if (batch_num == 0): save_imgs_from_g(x_g, epoch, args, False)
-
+                
                 loss_g = get_loss_g(args.wass, discriminator, x, x_g, valid, args.ali, z_prior, z_inf)
                 total_loss = loss_g
                 optimizers = [optimizer_g]
-
+                """
                 if (args.classifier):
                     x_to_classify = x
-                    
+                    """ 
                     if (args.cf_inf):
                         # x_to_classify ~ q(x | cf(z_inf))
                         x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.sample_from, generator)
                         if (batch_num == 0): save_imgs_from_g(x_to_classify, epoch, args, True)
-                    
+                    """
                     loss_c = log_reg_run_batch(batch_num, len(train_loader), x_to_classify, utts, labels, classifier, "train", epoch, args.epochs, tracker, arg_str)
                     
-                    total_loss += classifier_loss_weight*loss_c
+                    total_loss = classifier_loss_weight*loss_c # TODO: change = to +=
                     classifier_loss_weight += update_classifier_loss_weight(classifier_loss_weight, loss_wts, args)
-                    optimizers.append(optimizer_c)
+                    # optimizers.append(optimizer_c) TODO: replace the line below this one with this one
+                    optimizers = [optimizer_c]
 
                 descend(optimizers, total_loss)
                 tracker.update(epoch, "train_loss_total", total_loss.item(), batch_size)
             save_losses(tracker, "train_loss_total", args)
+           # save_losses(tracker, "train_loss_c", args)
+           #  save_losses(tracker, "train_loss_d", args)
             pbar.update()
         pbar.close()
         # finished training for epoch; print train loss, output images

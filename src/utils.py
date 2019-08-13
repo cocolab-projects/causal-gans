@@ -30,7 +30,7 @@ def args_to_string(args):
     if (args.classifier):
         string += "c+"
     if (args.ali):
-        string += "i+"
+        string += "ali+"
     if (args.cf_inf):
         string += "cf_from_{}+".format(args.sample_from)
     if (args.human_cf):
