@@ -21,6 +21,7 @@ import numpy as np
 from tqdm import tqdm
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
+from sklearn.linear_model import LogisticRegression as SklLogReg
 
 # torch
 import torch
@@ -135,16 +136,15 @@ def update_classifier_loss_weight(classifier_loss_weight, loss_wts, args):
     else: return 0.0
 
 def save_imgs_from_g(imgs, epoch, args, cfs):
-    with torch.no_grad():
-        if (not cfs):
-            imgs = imgs.data
-        n_imgs_per_row = 5
-        n_images = n_imgs_per_row**2
+    if (not cfs):
+        imgs = imgs.data
+    n_imgs_per_row = 5
+    n_images = n_imgs_per_row**2
 
-        if epoch % 5 == 0:
-            title = "{}GAN {}after {} epochs {}.png".format("W" if args.wass else "", "cfs " if cfs else "", format(epoch, "04"), args_to_string(args))
-            title = os.path.join(args.out_dir, title)
-            save_image(imgs[:n_images], title, nrow=n_imgs_per_row, normalize=True)
+    if epoch % 5 == 0:
+        title = "{}GAN {}after {} epochs {}.png".format("W" if args.wass else "", "cfs " if cfs else "", format(epoch, "04"), args_to_string(args))
+        title = os.path.join(args.out_dir, title)
+        save_image(imgs[:n_images], title, nrow=n_imgs_per_row, normalize=True)
 
 # TRAINING GAN (DESCENDING; COMPUTING GAN LOSS; CLIP DISCRIMINATOR; free/freeze params)
 
@@ -259,7 +259,7 @@ def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, args, o
             # x_to_classify ~ q(x | cf(z_inf))
             x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), sample_from, generator)
 
-        log_reg_run_batch(batch_num, len(loader), x_to_classify, utts, labels, model, mode, epoch, epochs, tracker, arg_str)
+        loss = log_reg_run_batch(batch_num, len(loader), x_to_classify, utts, labels, model, mode, epoch, epochs, tracker, arg_str)
 
         if (mode == "train"): descend([optimizer], loss)
     
@@ -354,7 +354,7 @@ def get_causal_mnist_loaders(using_gan, cf, transform, train_on_mnist):
     
     print("filled data loaders.")
 
-    return train_loader, valid_loader, test_loader
+    return train, train_loader, valid_loader, test_loader
 
 def combine_x_cf(x, z_inf, z_inf_mu, z_inf_sigma, sample_from, generator):
     latent_dim = z_inf.size(1)
@@ -377,21 +377,20 @@ def combine_x_cf(x, z_inf, z_inf_mu, z_inf_sigma, sample_from, generator):
 # ANALYZING INFERENCE AFTER TESTING
 
 def collect_inferences(inference_net, test_loader):
-    with torch.no_grad():
-        for batch_num, (x, utts, labels) in enumerate(test_loader):
-            x, utts, labels = x.to(device), utts, labels.to(device)
+    for batch_num, (x, utts, labels) in enumerate(test_loader):
+        x, utts, labels = x.to(device), utts, labels.to(device)
 
-            # define q(z|x)
-            z_inf_mu, z_inf_logvar = inference_net(x)
-            
-            if batch_num == 0:
-                all_utts = utts
-                means = z_inf_mu
-            else:
-                all_utts = np.concatenate((all_utts,utts))
-                means = torch.cat((means, z_inf_mu))
+        # define q(z|x)
+        z_inf_mu, z_inf_logvar = inference_net(x)
+        
+        if batch_num == 0:
+            all_utts = utts
+            means = z_inf_mu
+        else:
+            all_utts = np.concatenate((all_utts,utts))
+            means = torch.cat((means, z_inf_mu))
 
-        return means, all_utts
+    return means, all_utts
 
 def run_pca(means, all_utts, use_tsne, kinds_to_ignore):
     means = means.cpu().data.numpy()
@@ -427,7 +426,7 @@ if __name__ == "__main__":
     # set up classifier, data loaders, loss tracker
     classifier = LogisticRegression(args.human_cf or args.cf_inf).to(device)
     optimizer_c = torch.optim.Adam(classifier.parameters(), lr=args.lr, betas=(args.b1, args.b2))
-    train_loader, valid_loader, test_loader = get_causal_mnist_loaders(args.gan, args.human_cf, args.transform, args.train_on_mnist)
+    train_dataset, train_loader, valid_loader, test_loader = get_causal_mnist_loaders(args.gan, args.human_cf, args.transform, args.train_on_mnist)
     tracker = LossTracker()
 
     # Option 1: linear classifier alone
@@ -509,7 +508,7 @@ if __name__ == "__main__":
                         if (batch_num == 0): save_imgs_from_g(x_to_classify, epoch, args, True)
                     """
                     loss_c = log_reg_run_batch(batch_num, len(train_loader), x_to_classify, utts, labels, classifier, "train", epoch, args.epochs, tracker, arg_str)
-                    
+                     
                     total_loss = classifier_loss_weight*loss_c # TODO: change = to +=
                     classifier_loss_weight += update_classifier_loss_weight(classifier_loss_weight, loss_wts, args)
                     # optimizers.append(optimizer_c) TODO: replace the line below this one with this one
@@ -534,7 +533,20 @@ if __name__ == "__main__":
 
     set_mode([classifier, generator, inference_net, discriminator], "test")
     set_params([classifier, generator, inference_net, discriminator], [])
+    """
+    # ali: historgram of cfs (commented out; in progress)
+    
+    # obtain a classifier
+    x, y = train_dataset.np_train_data()
+    breakpoint()
+    classifier = SklLogReg(random_state=args.seed, solver='liblinear').fit(x,y)
 
+    # get a batch of images
+
+    # create histogram of cfs for batch, using inference_net and classifier
+
+    # plot histogram data
+    """
     # classifier: accuracy
     if (args.classifier):
         test_log_reg_from_checkpoint(test_loader, tracker, args)
@@ -550,5 +562,6 @@ if __name__ == "__main__":
     run_pca(means, all_utts, False, []) # no tsne
     run_pca(means, all_utts, True, [])  # yes tsne
 
-    print("finished PCA")
+    print("finished PCA") 
+
     breakpoint()
