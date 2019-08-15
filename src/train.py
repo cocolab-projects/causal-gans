@@ -103,7 +103,7 @@ def handle_args():
     if (args.cf_inf):
         args.classifier = True
         args.ali = True
-    if (args.wass or args.ali or args.classifier):
+    if (args.wass or args.ali):
         args.gan = True
     if (args.gan):
         args.human_cf = False
@@ -111,8 +111,14 @@ def handle_args():
         args.classifier = True
 
     args.time = datetime.datetime.now()
+    arg_str = args_to_string(args)
+    # create a directory for all data
+    args.out_dir += "/{}/".format(arg_str)
+    if not os.path.exists(args.out_dir):
+        os.makedirs(args.out_dir)
 
-    return args
+    print("args:{}".format(arg_str))
+    return args, arg_str
 
 # CHECKPOINTS AND PROGRESS WHILE TRAINING
 
@@ -401,14 +407,11 @@ def run_pca(means, all_utts, use_tsne, kinds_to_ignore):
 
 if __name__ == "__main__":
     # basic setup from args
-    args = handle_args()
+    args, arg_str = handle_args()
     device = torch.device('cuda' if args.cuda else 'cpu')
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     torch.cuda.manual_seed(args.seed)
-
-    arg_str = args_to_string(args)
-    print("args:{}".format(arg_str))
 
     # set up classifier, data loaders, loss tracker
     classifier = LogisticRegression(args.human_cf or args.cf_inf).to(device)
@@ -416,12 +419,6 @@ if __name__ == "__main__":
     train_dataset, train_loader, valid_loader, test_loader = get_causal_mnist_loaders(args.gan, args.human_cf, args.transform, args.train_on_mnist)
     tracker = LossTracker()
 
-    # Option 1: linear classifier alone
-    if (not args.gan):
-        run_log_reg(classifier, optimizer_c, train_loader, valid_loader, test_loader, args, tracker)
-        breakpoint()    # to prevent GAN from training
-
-    # Option 2: (W)GAN + X (classifier, inference, training on generated cfs)
     generator = ConvGenerator(args.latent_dim, args.wass, args.train_on_mnist).to(device)
     inference_net = InferenceNet(1, 64, args.latent_dim).to(device)
     discriminator = ConvDiscriminator(args.wass, args.train_on_mnist, args.ali, args.latent_dim).to(device)
@@ -445,68 +442,70 @@ if __name__ == "__main__":
             x, utts, labels = x.to(device), utts, labels.to(device) # x.shape = (64, 1, 64, 64)
             batch_size = x.size(0)
             
-            """
-            set_params([generator, inference_net, classifier, discriminator], [discriminator])
+            if (args.gan):
+                set_params([generator, inference_net, classifier, discriminator], [discriminator])
 
-            # adversarial ground truths
-            valid = torch.ones(x.size(0), 1, device=device)
-            fake = torch.zeros(x.size(0), 1, device=device)
+                # adversarial ground truths
+                valid = torch.ones(x.size(0), 1, device=device)
+                fake = torch.zeros(x.size(0), 1, device=device)
 
-            # z_prior ~ N(0,1)
-            z_prior = torch.randn(batch_size, args.latent_dim, device=device)
-            
-            # define q(z|x)
-            z_inf_mu, z_inf_logvar = inference_net(x) # note: x may not be appropriate shape
+                # z_prior ~ N(0,1)
+                z_prior = torch.randn(batch_size, args.latent_dim, device=device)
+                
+                # define q(z|x)
+                z_inf_mu, z_inf_logvar = inference_net(x) # note: x may not be appropriate shape
 
-            # z_inf ~ q(z|x)
-            z_inf = reparameterize(z_inf_mu, z_inf_logvar)
+                # z_inf ~ q(z|x)
+                z_inf = reparameterize(z_inf_mu, z_inf_logvar)
 
-            # x ~ p(x | z_prior)
-            x_g = generator(z_prior)
+                # x ~ p(x | z_prior)
+                x_g = generator(z_prior)
 
-            # train discriminator
-            loss_d = get_loss_d(args.wass, discriminator, x, x_g, valid, fake, args.ali, z_prior, z_inf)
-            descend([optimizer_d], loss_d)
-            tracker.update(epoch, "train_loss_d", loss_d.item(), batch_size)
+                # train discriminator (and inference_net, if args.ali)
+                loss_d = get_loss_d(args.wass, discriminator, x, x_g, valid, fake, args.ali, z_prior, z_inf)
+                descend([optimizer_d], loss_d)
+                tracker.update(epoch, "train_loss_d", loss_d.item(), batch_size)
 
-            # clip discriminator if wass
             if (args.wass): clip_discriminator(discriminator)
-            """
+
             # train generator (and classifier if necessary); execute unconditionally if GAN and periodically if WGAN
             if not args.wass or batch_num % args.n_critic == 0:
 
                 set_params([generator, inference_net, classifier, discriminator], [generator, inference_net, classifier])
-                """
-                # x_g ~ p(x|z_prior)
-                x_g = generator(z_prior)
+                total_loss = 0
+                optimizers = []
 
-                if (batch_num == 0): save_imgs_from_g(x_g, epoch, args, False)
-                
-                loss_g = get_loss_g(args.wass, discriminator, x, x_g, valid, args.ali, z_prior, z_inf)
-                total_loss = loss_g
-                optimizers = [optimizer_g]
-                """
+                if (args.gan):
+                    # x_g ~ p(x|z_prior)
+                    x_g = generator(z_prior)
+
+                    if (batch_num == 0): save_imgs_from_g(x_g, epoch, args, False)
+                    
+                    loss_g = get_loss_g(args.wass, discriminator, x, x_g, valid, args.ali, z_prior, z_inf)
+                    total_loss += loss_g
+                    optimizers.append(optimizer_g)
+
                 if (args.classifier):
                     x_to_classify = x
-                    """ 
+
                     if (args.cf_inf):
                         # x_to_classify ~ q(x | cf(z_inf))
                         x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.sample_from, generator)
                         if (batch_num == 0): save_imgs_from_g(x_to_classify, epoch, args, True)
-                    """
+
                     loss_c = log_reg_run_batch(batch_num, len(train_loader), x_to_classify, utts, labels, classifier, "train", epoch, args.epochs, tracker, arg_str)
-                     
-                    total_loss = classifier_loss_weight*loss_c # TODO: change = to +=
+                    total_loss += classifier_loss_weight*loss_c 
                     classifier_loss_weight += update_classifier_loss_weight(classifier_loss_weight, loss_wts, args)
-                    # optimizers.append(optimizer_c) TODO: replace the line below this one with this one
-                    optimizers = [optimizer_c]
+                    optimizers.append(optimizer_c)
 
                 descend(optimizers, total_loss)
                 tracker.update(epoch, "train_loss_total", total_loss.item(), batch_size)
+
             save_losses(tracker, "train_loss_total", args)
-           # save_losses(tracker, "train_loss_c", args)
-           #  save_losses(tracker, "train_loss_d", args)
+            if (args.classifier):  save_losses(tracker, "train_loss_c", args)
+            if (args.discriminator):  save_losses(tracker, "train_loss_d", args)
             pbar.update()
+
         pbar.close()
         # finished training for epoch; print train loss, output images
         print('====> total train loss\t\t(epoch {}):\t {:.4f}'.format(epoch+1, tracker["train_loss_total"][epoch].avg))
@@ -522,7 +521,7 @@ if __name__ == "__main__":
     set_params([classifier, generator, inference_net, discriminator], [])
 
     # ali: historgram of cfs (commented out; in progress)
-    
+    """    
     # obtain a classifier
     x, y = train_dataset.np_train_data()
     breakpoint()
@@ -531,7 +530,8 @@ if __name__ == "__main__":
     # get a batch of images
 
     # create histogram of cfs for batch, using inference_net and classifier
-
+    sanity check: show histogram for gans
+    """
     # plot histogram data
     # classifier: accuracy
     if (args.classifier):
