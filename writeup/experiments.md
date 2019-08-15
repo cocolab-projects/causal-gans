@@ -30,14 +30,16 @@ QUESTION: do the images look good?
 
 QUESTION: inspect probabilities and CFs:
 
-* What is P(3)? What is P(4)? What is P(3 and 4)? How do these compare to the correct probabilities?
-  * CORRECT: P(3) = ; MODEL: P(3) = ;
-  * CORRECT: P(4) = ; MODEL: P(4) = ;
-  * CORRECT: P(3 AND 4) = ; MODEL: P(3 AND 4) = ;
+* What is P(3, 4)? How do these compare to the correct probabilities?
+  * CORRECT: P(3 AND 4) = 0.72; MODEL: P(3 AND 4) = ;
+  * CORRECT: P(3 AND !4) = 0.02; MODEL: P(3 AND !4) = ;
+  * CORRECT: P(!3 AND 4) = 0.24; MODEL: P(3 AND 4) = ;
+  * CORRECT: P(!3 AND !4) = 0.02; MODEL: P(3 AND !4) = ;
 * Inspect CFs (after adding CF transform):
   * (how) are the CFs different for "causal" and "noncausal" target images?
   * Given actual "causal" and "noncausal" target images, what is P_CF(3 | !4)? How does this compare to the correct CF probabilities?
-    * CORRECT: P_CF(3 | !4) = ; MODEL: P(3 | !4) = ;
+    * "causal" target (C, cE): CORRECT: P_CF(3 | !4) = ; MODEL: P(3 | !4) = ;
+    * "noncausal" target (nC, bE): CORRECT: P_CF(3 | !4) = ; MODEL: P(3 | !4) = ;
 
 ### Causal GAN
 
