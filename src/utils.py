@@ -14,12 +14,30 @@ PROCESSED_MAX_COLOR = 1.0
 EPSILON = 1e-3      # window around z to resample
 PRIOR_WEIGHT = .5   # weights for prior (as opposed to posterior) distribution
 
-# UTILS: SAVING/READING FILES
+# UTILS: data -> string
 
 def data_file_name(prefix, suffix):
     cur_dir = os.path.dirname(__file__)
     file_name = os.path.join(cur_dir, "../data/{}_{}.npy".format(prefix, suffix))
     return os.path.realpath(file_name)
+
+def args_to_string(args):
+    string = "["
+    if (args.wass):
+        string += "w"
+    if (args.gan):
+        string += "g+"
+    if (args.classifier):
+        string += "c+"
+    if (args.ali):
+        string += "ali+"
+    if (args.cf_inf):
+        string += "cf_from_{}+".format(args.sample_from)
+    if (args.human_cf):
+        string += "human_cfs+"
+    string += "e{}+{}".format(args.epochs, args.time).replace(" ", "+")
+    string += "]"
+    return string
 
 # UTILS: MODELS and PREPROCESSING
 
@@ -107,13 +125,14 @@ class LossTracker():
     def __getitem__(self, kind):
         return self.loss_kinds[kind]
 
-def save_checkpoint(state, is_best, folder='./', filename='checkpoint.pth.tar'):
+def save_checkpoint(state, is_best, arg_str, folder='./'):
+    filename = 'checkpoint{}.pth.tar'.format(arg_str)
     if not os.path.isdir(folder):
         os.mkdir(folder)
     torch.save(state, os.path.join(folder, filename))
     if is_best:
         shutil.copyfile(os.path.join(folder, filename),
-                        os.path.join(folder, 'model_best.pth.tar'))
+                        os.path.join(folder, 'model_best{}.pth.tar'.format(arg_str)))
 
 def free_params(module):
     for p in module.parameters(): p.requires_grad = True
@@ -131,54 +150,55 @@ def reparameterize(mu, logvar):
     eps = torch.randn_like(std)
     return eps.mul(std).add(mu)
 
-def nearby(sample, img_prior_along_dim):
-    return img_prior_along_dim - EPSILON <= sample and sample <= img_prior_along_dim + EPSILON
+def nearby(sample, z):
+    return z.item() - EPSILON <= sample and sample <= z.item() + EPSILON
 
 # resamples from given dist until it finds something that
 # isn't close to z
-def normal_resample(img_prior_along_dim, mean=0, std_dev=1):
-    sample = np.random.normal(mean, std_dev)
-    while (nearby(sample, img_prior_along_dim)):
-        sample = np.random.normal(mean, std_dev)
+def normal_resample(z, mu=0, sigma=1):
+    sample = (torch.randn(1).item())*sigma + mu
+    while (nearby(sample, z)):
+        sample = torch.randn(1)*sigma + mu
 
     return sample
 
-def resample(img_prior_along_dim, post_mean, post_std_dev, sample_from):
-    if (sample_from == "prior"):
-        return normal_resample(img_prior_along_dim)
-    elif (sample_from == "post"):
-        return normal_resample(img_prior_along_dim, post_mean, post_std_dev)
-    elif (sample_from == "mix"):
-        if (np.random.binomial(1, PRIOR_WEIGHT)):
-            return normal_resample(img_prior_along_dim)
-        else:
-            return normal_resample(img_prior_along_dim, post_mean, post_std_dev)
+def mix_resample(z, mu, sigma):
+    if (np.random.binomial(1, PRIOR_WEIGHT)):
+        return normal_resample(z)
+    else:
+        return normal_resample(z, mu, sigma)
 
-def latent_cfs(z, post_mean, post_logvar, sample_from):
+def latent_cfs(dim, z, mu, sigma, sample_from):
     batch_size = z.size(0)
-    latent_dim = z.size(1)
-    post_std_dev = torch.exp(0.5*post_logvar)
+    z_col, mu, sigma = z[:,dim], mu[:,dim], sigma[:,dim]
 
-    batch_cfs = []
-    for img in range(batch_size):
-        img_cfs = []
-        img_prior = z[img]
+    if (sample_from== "prior"):
+        cfs = [normal_resample(z_col[i]) for i in range(batch_size)]
+    elif (sample_from == "post"):
+        cfs = [normal_resample(z_col[i], mu[i], sigma[i]) for i in range(batch_size)]
+    elif (sample_from == "mix"):
+        cfs = [mix_resample(z_col[i], mu[i], sigma[i]) for i in range(batch_size)]
+    else:
+        raise RuntimeError("latent_cfs was expecting 'prior', 'post', or 'mix'.")
+    
+    cfs = torch.FloatTensor(cfs)
+    z_cf = z.clone()
 
-        for dim in range(latent_dim):
-            cf = copy.deepcopy(img_prior) # or .clone()
-            cf[dim] = resample(img_prior[dim], post_mean[img][dim], post_std_dev[img][dim], sample_from)
-            img_cfs.append(cf)
+    z_cf[:, dim] = cfs
 
-        batch_cfs.append(img_cfs)
-    breakpoint()
-    return torch.FloatTensor(batch_cfs)
+    return z_cf
 
 if __name__ == "__main__":
+    torch.manual_seed(42)
+    np.random.seed(42)
     batch_size = 2
-    latent_dim = 4
-    z_prior = torch.randn(batch_size, latent_dim)
-    print(z_prior)
-    mu = torch.FloatTensor([[ 3.0, 3.0, 3.0, 3.0], [ 3.0, 3.0, 3.0, 3.0]])
-    log_var = torch.FloatTensor([[0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]])
-    cfs = latent_cfs(z_prior, mu, log_var, "post")
+    latent_dims = 4
+
+    z_inf = torch.randn(batch_size, latent_dims)
+    print(z_inf)
+    mu = torch.FloatTensor([[ 3.0]*latent_dims]*batch_size)
+    stddev = torch.FloatTensor([[.10]*latent_dims] *batch_size)
+
+    dim_to_vary = 1
+    cfs = latent_cfs(dim_to_vary, z_inf, mu, stddev, "mix")
     print(cfs)

@@ -1,9 +1,7 @@
 """
 models.py
-
 Credit for generator/discriminator goes to eriklindernoren
 Credit for inference net goes to mhw32
-
 @author mmosse19
 @version July 2019
 """
@@ -23,6 +21,7 @@ class LogisticRegression(nn.Module):
         if (cf): input_dim *=TOTAL_NUM_WORLDS
         self.linear = torch.nn.Linear(input_dim, output_dim)
         self.criterion = torch.nn.BCELoss()
+        self.cf = cf
 
     def forward(self, img):
         batch_sz = img.size(0)
