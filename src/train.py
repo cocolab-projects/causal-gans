@@ -65,7 +65,7 @@ def handle_args():
                         help='learning rate [default: 2e-4]')
     parser.add_argument('--lr_d', type=float, default=1e-5,
                         help='discriminator learning rate [default: 1e-5]')
-    parser.add_argument('--epochs', type=int, default=51,
+    parser.add_argument('--epochs', type=int, default=201,
                         help='number of training epochs [default: 101]')
     parser.add_argument('--cuda', action='store_false',
                         help='Enable cuda')
@@ -245,7 +245,7 @@ def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, args, o
     set_mode([model], mode)
     set_params([model], [model] if mode == "train" else [])
     for batch_num, (x, utts, labels) in enumerate(loader):
-        if (batch_num % args.n_critic == 0): continue
+        if (batch_num % args.n_critic != 0): continue
         x, utts, labels = x.to(device), utts, labels.to(device)
         x_to_classify = x
 
@@ -307,19 +307,6 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, args, optimiz
 # train/test/validate log reg
 def run_log_reg(model, optimizer, train_loader, valid_loader, test_loader, args, tracker):
     for epoch in range(int(args.epochs)):
-        """
-        temp train loop:
-        for batch_num, (x, utts, labels) in enumerate(loader):
-            if (batch_num % args.n_critic == 0): continue
-            x, utts, labels = x.to(device), utts, labels.to(device)
-            set_params([model], [model])
-            x_to_classify = x
-            loss = log_reg_run_batch(batch_num, len(loader), x_to_classify, utts, labels, model, mode, epoch, epochs, tracker, arg_str)
-
-            descend([optimizer], loss)
-            tracker.update("train_loss_c", )
-        print('====> total train loss\t\t(epoch {}):\t {:.4f}'.format(epoch+1, tracker["train_loss_total"][epoch].avg))
-        """
         log_reg_run_epoch(train_loader, model, "train", epoch, args.epochs, tracker, args, optimizer=optimizer)
         log_reg_run_epoch(valid_loader, model, "validate", epoch, args.epochs, tracker, args)
 
@@ -533,7 +520,7 @@ if __name__ == "__main__":
 
     set_mode([classifier, generator, inference_net, discriminator], "test")
     set_params([classifier, generator, inference_net, discriminator], [])
-    """
+
     # ali: historgram of cfs (commented out; in progress)
     
     # obtain a classifier
@@ -546,7 +533,6 @@ if __name__ == "__main__":
     # create histogram of cfs for batch, using inference_net and classifier
 
     # plot histogram data
-    """
     # classifier: accuracy
     if (args.classifier):
         test_log_reg_from_checkpoint(test_loader, tracker, args)
