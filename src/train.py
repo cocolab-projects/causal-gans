@@ -1,12 +1,10 @@
 """
 train.py
 
-TODO: record the different kinds of losses; rename checkpoint to model_most_recent; make it const. then train.
-
 Much credit for GAN training goes to eriklindernoren, mhw32
 
 @author mmosse19
-@version July 2019
+@version August 2019
 """
 # general
 import os
@@ -166,7 +164,7 @@ def get_loss_d(wass, discriminator, x, x_g, valid, fake, attach_inference, z_pri
         pred_real = discriminator(x, z_inf)
         return torch.mean(F.softplus(-pred_real)) + torch.mean(F.softplus(pred_fake))
     elif (wass):
-        return -torch.mean(discriminator(x)) + torch.meang(discriminator(x_g))
+        return -torch.mean(discriminator(x)) + torch.mean(discriminator(x_g))
     else:
         real_loss = discriminator.criterion(discriminator(x), valid)
         fake_loss = discriminator.criterion(discriminator(x_g), fake)
@@ -264,10 +262,13 @@ def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, args, o
 
             # x_to_classify ~ q(x | cf(z_inf))
             x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), sample_from, generator)
-
-        loss = log_reg_run_batch(batch_num, len(loader), x_to_classify, utts, labels, model, mode, epoch, epochs, tracker, arg_str)
-
-        if (mode == "train"): descend([optimizer], loss)
+        
+        if (mode != "train"):
+            with torch.no_grad():
+                loss = log_reg_run_batch(batch_num, len(loader), x_to_classify, utts, labels, model, mode, epoch, epochs, tracker, arg_str)
+        else:
+            loss = log_reg_run_batch(batch_num, len(loader), x_to_classify, utts, labels, model, mode, epoch, epochs, tracker, arg_str)
+            descend([optimizer], loss)
     
 # model is log reg model
 def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, args, optimizer = None, generator=None, inference_net=None):
@@ -405,6 +406,10 @@ def run_pca(means, all_utts, use_tsne, kinds_to_ignore):
     plt.legend()
     plt.savefig(os.path.join(args.out_dir, 'ALI_{}{}.png'.format("TSNE" if use_tsne else "PCA", arg_str)))
 
+def get_test_batch(train_loader):
+    for i, (x, utts, labels) in enumerate(test_loader):
+        return x, utts, labels
+
 if __name__ == "__main__":
     # basic setup from args
     args, arg_str = handle_args()
@@ -468,8 +473,8 @@ if __name__ == "__main__":
 
             if (args.wass): clip_discriminator(discriminator)
 
-            # train generator (and classifier if necessary); execute unconditionally if GAN and periodically if WGAN
-            if not args.wass or batch_num % args.n_critic == 0:
+            # train generator (and classifier if necessary); TODO: execute unconditionally if GAN and periodically if WGAN
+            if batch_num % args.n_critic == 0:
 
                 set_params([generator, inference_net, classifier, discriminator], [generator, inference_net, classifier])
                 total_loss = 0
@@ -503,7 +508,7 @@ if __name__ == "__main__":
 
             save_losses(tracker, "train_loss_total", args)
             if (args.classifier):  save_losses(tracker, "train_loss_c", args)
-            if (args.discriminator):  save_losses(tracker, "train_loss_d", args)
+            if (args.gan):  save_losses(tracker, "train_loss_d", args)
             pbar.update()
 
         pbar.close()
@@ -517,33 +522,65 @@ if __name__ == "__main__":
 
     # TESTING
 
-    set_mode([classifier, generator, inference_net, discriminator], "test")
-    set_params([classifier, generator, inference_net, discriminator], [])
-
-    # ali: historgram of cfs (commented out; in progress)
-    """    
-    # obtain a classifier
-    x, y = train_dataset.np_train_data()
-    breakpoint()
-    classifier = SklLogReg(random_state=args.seed, solver='liblinear').fit(x,y)
-
-    # get a batch of images
-
-    # create histogram of cfs for batch, using inference_net and classifier
-    sanity check: show histogram for gans
-    """
-    # plot histogram data
-    # classifier: accuracy
-    if (args.classifier):
-        test_log_reg_from_checkpoint(test_loader, tracker, args)
-
-    # ali: pca
-    print("finished testing. running PCA.")
     epoch, classifier_state, generator_state, inference_net_state, tracker, cached_args = load_checkpoint(args.out_dir, arg_str)
 
     generator.load_state_dict(generator_state)
     inference_net.load_state_dict(inference_net_state)
 
+    set_mode([classifier, generator, inference_net, discriminator], "test")
+    set_params([classifier, generator, inference_net, discriminator], [])
+
+    # HISTOGRAM
+    # obtain a classifier
+    x, y = train_dataset.np_train_data()
+    x = x[:,0,...].reshape(x[:,0,...].shape[0], 64*64)
+    quick_class = SklLogReg(random_state=args.seed, solver='liblinear', multi_class='ovr').fit(x,y)
+
+    # get a batch of images and cfs
+    x, utts, labels = get_test_batch(train_loader)
+    x, labels = x.to(device), labels.to(device)
+    z_inf_mu, z_inf_logvar = inference_net(x)
+    z_inf = reparameterize(z_inf_mu, z_inf_logvar)
+    cfs = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.sample_from, generator).cpu().numpy()
+    cfs = cfs[:,0,...]
+
+    # create histogram
+    inf_utt_map = {}
+    for i, cf in enumerate(cfs):
+        cf_imgs = np.split(cf, 5)
+        breakpoint()
+        if utts[i] in inf_utt_map:
+            inf_utt_map[utts[i]] += np.rint(quick_class.predict(np.asarray(cf_imgs[1:]).reshape(4, 64*64)))
+        else:
+            inf_utt_map[utts[i]] = np.rint(quick_class.predict(np.asarray(cf_imgs[1:]).reshape(4, 64*64)))
+    
+    # sanity check: histogram for gans
+    z_prior = torch.randn(batch_size, args.latent_dim, device=device)
+    x_gen1 = generator(z_prior).cpu().numpy()[:,0,...]
+    z_prior = torch.randn(batch_size, args.latent_dim, device=device)
+    x_gen2 = generator(z_prior).cpu().numpy()[:,0,...]
+    z_prior = torch.randn(batch_size, args.latent_dim, device=device)
+    x_gen3 = generator(z_prior).cpu().numpy()[:,0,...]
+    z_prior = torch.randn(batch_size, args.latent_dim, device=device)
+    x_gen4 = generator(z_prior).cpu().numpy()[:,0,...]
+    
+    gan_utt_map = {}
+    for i, cf in enumerate(cfs):
+        cf_imgs = [x[i], x_gen1[i], x_gen2[i], x_gen3[i], x_gen4[i]]
+        if utts[i] in gan_utt_map:
+            gan_utt_map[utts[i]] += np.rint(quick_class.predict(np.asarray(cf_imgs[1:]).reshape(4, 64*64)))
+        else:
+            gan_utt_map[utts[i]] = np.rint(quick_class.predict(np.asarray(cf_imgs[1:]).reshape(4, 64*64))) 
+
+    # plot histogram data
+     
+
+    # CLASSIFIER ACCURACY
+    if (args.classifier):
+        test_log_reg_from_checkpoint(test_loader, tracker, args)
+
+    # PCA
+    print("finished testing. running PCA.")
     means, all_utts = collect_inferences(inference_net, test_loader)
     run_pca(means, all_utts, False, []) # no tsne
     run_pca(means, all_utts, True, [])  # yes tsne

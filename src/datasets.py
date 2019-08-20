@@ -92,15 +92,15 @@ class CausalMNIST(Dataset):
             return len(self.mnist["digits"])
         else:
             return self.length
-    """
+
+    def label_to_num(self, label):
+        if (label == str(NUM1)): return 1.0
+        elif (label == str(NUM2)): return 2.0
+        elif (str(NUM1) in label and str(NUM2) in label): return 3.0
+        else: return 0.0
+
     def np_train_data(self):
-        x = np.asarray(self.imgs)
-        y = np.asarray([label_to_num(label) for label in self.labels])
+        x = np.asarray([np.asarray(img) for img in self.imgs])
+        y = np.asarray([self.label_to_num(label) for label in self.labels])
         return x, y
 
-    def label_to_num(label):
-        if (label == str(NUM1)): return 1
-        elif (label == str(NUM2)): return 2
-        elif (str(NUM1) in label and str(NUM2) in label): return 3
-        else: return 0
-    """
