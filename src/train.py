@@ -4,6 +4,7 @@ train.py
 Much credit for GAN training goes to eriklindernoren, mhw32
 
 TODO: add support for training with human-generated cfs
+TODO: and show the true distribution
 
 @author mmosse19
 @version August 2019
@@ -415,21 +416,21 @@ def add_imgs(cf_imgs, utt, utt_map, quick_class):
         utt_map[utt] = np.rint(quick_class.predict(np.asarray(cf_imgs[1:]).reshape(4, 64*64)))
 
 # reference for code: https://matplotlib.org/3.1.1/gallery/lines_bars_and_markers/barchart.html#sphx-glr-gallery-lines-bars-and-markers-barchart-py
-def hist_bar_plot(utt_map, objects, x_axis, title, out_dir):
+def hist_bar_plot(utt_map, objects, x_axis, title, out_dir, train_dataset):
     breakpoint()
     utt_map = {key : dict(zip(np.unique(utt_map[key], return_counts=True)[0], np.unique(utt_map[key], return_counts=True)[1])) for key in utt_map}
     fig, ax = plt.subplots()
     width = .08
     for i, (label, dict_for_label) in enumerate(utt_map.items()):
         densities = [dict_for_label[obj] for obj in objects]
-        rects = ax.bar(x_axis - width + width*i, densities, width, align='edge', label=label)
-
+        rects = ax.bar(x_axis - width + width*i, densities, width, align='edge', label=(label if label else "empty"))
     
     ax.set_xticks(x_axis)
-    ax.set_xtickslabels(objects)
+    ax.set_xticklabels([str(cond) for cond in train_dataset.label_conds])
     ax.set_ylabel("Density")
+    ax.set_xlabel("Characterization of Cfs")
     ax.set_title("Distribution Over Cfs")
-    ax.legend()
+    ax.legend(title="Utterance for Original Image")
 
     plt.savefig(os.path.join(out_dir, title))
 
@@ -563,8 +564,8 @@ if __name__ == "__main__":
     # get a batch of images and cfs
     inf_utt_map = {}
     gan_utt_map = {}
+    true_cf_utt_map = {}
     for index, (x, utts, labels) in enumerate(test_loader):
-        breakpoint()
         # hist for ali
         x, labels = x.to(device), labels.to(device)
         z_inf_mu, z_inf_logvar = inference_net(x)
@@ -581,16 +582,17 @@ if __name__ == "__main__":
             z_prior = torch.randn(batch_size, args.latent_dim, device=device)
             x_gens.append(generator(z_prior).cpu().numpy()[:,0,...])
         
-        gan_utt_map = {}
         for i, cf in enumerate(cfs):
             cf_imgs = [x[i]] + [x_gen[i] for x_gen in x_gens]
             add_imgs(cf_imgs, utts[i], gan_utt_map, quick_class)
 
+        # hist for actual cfs (sanity check)
+
     # plot histogram data
     objects = tuple(train_dataset.label_nums)
     x_axis = np.arange(len(objects))
-    hist_bar_plot(inf_utt_map, objects, x_axis, "ALI-hist.png", args.out_dir)
-    hist_bar_plot(gan_utt_map, objects, x_axis, "GAN-hist.png", args.out_dir)
+    hist_bar_plot(inf_utt_map, objects, x_axis, "ALI-hist.png", args.out_dir, train_dataset)
+    hist_bar_plot(gan_utt_map, objects, x_axis, "GAN-hist.png", args.out_dir, train_dataset)
 
     # CLASSIFIER ACCURACY
     if (args.classifier):

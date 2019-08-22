@@ -81,7 +81,9 @@ class CausalMNIST(Dataset):
         self.imgs = [self.img_transform(Image.fromarray(pt[0])) for pt in scenarios]
         self.labels = [pt[1] for pt in scenarios]
         self.label_kinds = set(self.labels)
-        self.label_nums = np.arange(0.0, 4.0, 1.0)
+        # note: these are for the labels used by the sklearn classifier, no the labels used for log reg
+        self.label_conds = [[str(NUM1), str(NUM2)], [str(NUM1)], [str(NUM2)], []] 
+        self.label_nums = np.arange(0.0, float(len(self.label_conds)), 1.0)
 
     def __getitem__(self, index):
         if (self.train_on_mnist):
@@ -96,10 +98,10 @@ class CausalMNIST(Dataset):
             return self.length
 
     def label_to_num(self, label):
-        if (str(NUM1) in label and str(NUM2) in label): return self.label_nums[0]
-        elif (str(NUM1) in label): return self.label_nums[1]
-        elif (str(NUM2) in label): return self.label_nums[2]
-        else: return self.label_nums[3]
+        for i in range(len(self.label_conds)):
+            cond = self.label_conds[i]
+            if (all(s in label for s in cond)):
+                return self.label_nums[i]
 
     def np_train_data(self):
         x = np.asarray([np.asarray(img) for img in self.imgs])
