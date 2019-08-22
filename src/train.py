@@ -3,6 +3,8 @@ train.py
 
 Much credit for GAN training goes to eriklindernoren, mhw32
 
+TODO: add support for training with human-generated cfs
+
 @author mmosse19
 @version August 2019
 """
@@ -81,7 +83,7 @@ def handle_args():
                         help="interval betwen image samples")
     parser.add_argument("--clip_value", type=float, default=0.01,
                         help="lower and upper clip value for disc. weights")
-    parser.add_argument('--n_critic', type=int, default=5,
+    parser.add_argument('--n_critic', type=int, default=1,
                         help="number of training steps for discriminator per iter")
     parser.add_argument('--wass', action='store_true',
                         help="use WGAN instead of GAN")
@@ -129,11 +131,11 @@ def save_losses(tracker, kind, args):
     # save tracker loss avgs (for each epoch) to file
     num_epochs_with_data = len(tracker[kind])
     losses = [tracker[kind][e].avg for e in range(num_epochs_with_data)]
-    np.savetxt(os.path.join(args.out_dir, "progress_{}_{}.txt".format(kind, args_to_string(args))), losses)
+    np.savetxt(os.path.join(args.out_dir, "progress_{}.txt".format(kind)), losses)
 
 def update_classifier_loss_weight(classifier_loss_weight, loss_wts, args):
     loss_wts.append(classifier_loss_weight)
-    np.savetxt(os.path.join(args.out_dir,"./progress_class_loss_wt_{}.txt".format(args_to_string(args))), loss_wts)
+    np.savetxt(os.path.join(args.out_dir,"./progress_class_loss_wt.txt"), loss_wts)
 
     if (classifier_loss_weight < MAX_CLASS_WT and args.gradual_wt and epoch > START_INCREASE_CLASS_WT):
         return MAX_CLASS_WT*(1.0 if not args.wass else args.n_critic) / ((args.epochs-25.0)*len(train_loader))
@@ -146,7 +148,7 @@ def save_imgs_from_g(imgs, epoch, args, cfs):
     n_images = n_imgs_per_row**2
 
     if epoch % 5 == 0:
-        title = "{}GAN {}after {} epochs {}.png".format("W" if args.wass else "", "cfs " if cfs else "", format(epoch, "04"), args_to_string(args))
+        title = "{}GAN {}after {} epochs.png".format("W" if args.wass else "", "cfs " if cfs else "", format(epoch, "04"))
         title = os.path.join(args.out_dir, title)
         save_image(imgs[:n_images], title, nrow=n_imgs_per_row, normalize=True)
 
@@ -571,9 +573,34 @@ if __name__ == "__main__":
             gan_utt_map[utts[i]] += np.rint(quick_class.predict(np.asarray(cf_imgs[1:]).reshape(4, 64*64)))
         else:
             gan_utt_map[utts[i]] = np.rint(quick_class.predict(np.asarray(cf_imgs[1:]).reshape(4, 64*64))) 
-
+    breakpoint()
     # plot histogram data
-     
+    objects = tuple(set(list(inf_utt_map.values()) + list(gan_utt_map.values())))     
+    y_pos = np.arange(len(objects))
+
+    inf_utt_map = {key : dict(zip(np.unique(inf_utt_map), return_counts=True)) for key in inf_utt_map}
+    for i, label in enumerate(train_dataset.label_kinds):
+        color = (i*.2, i*.2, i*.2, .8)
+        densities = [inf_utt_map[label][obj] for obj in objects] # turn this into for loop
+        plt.bar(y_pos, densities, align='center', alpha=.5, color=c)
+        print(label_kinds)
+    plt.xticks(y_pos, objects)
+
+    plt.ylabel("Density")
+    plt.title("Distribution over cfs")
+    plt.savefig(os.path.join(args.out_dir, "ALI-hist.png")
+
+    gan_utt_map = {key : dict(zip(np.unique(gan_utt_map), return_counts=True)) for key in gan_utt_map}
+    for i, label in enumerate(train_dataset.label_kinds):
+        color = (i*.2, i*.2, i*.2, .8)
+        densities = [gan_utt_map[label][obj] for obj in objects] # turn this into for loop
+        plt.bar(y_pos, densities, align='center', alpha=.5, color=c)
+        print(label_kinds)
+    plt.xticks(y_pos, objects)
+
+    plt.ylabel("Density")
+    plt.title("Distribution over cfs")
+    plt.savefig(os.path.join(args.out_dir, "GAN-hist.png")
 
     # CLASSIFIER ACCURACY
     if (args.classifier):

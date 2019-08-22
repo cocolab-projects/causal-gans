@@ -80,6 +80,7 @@ class CausalMNIST(Dataset):
 
         self.imgs = [self.img_transform(Image.fromarray(pt[0])) for pt in scenarios]
         self.labels = [pt[1] for pt in scenarios]
+        self.label_kinds = set(labels)
 
     def __getitem__(self, index):
         if (self.train_on_mnist):
