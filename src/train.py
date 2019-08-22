@@ -74,10 +74,8 @@ def handle_args():
                         help="adam: decay of first order momentum of gradient")
     parser.add_argument("--b2", type=float, default=0.999,
                         help="adam: decay of first order momentum of gradient")
-    # when not using GAN
-    parser.add_argument("--human_cf", action='store_true')
-
-    # when using GN
+    # GAN-specific
+    parser.add_argument(--"human_cf", action='store_true')
     parser.add_argument("--latent_dim", type=int, default=4,
                         help="dimensionality of the latent space")
     parser.add_argument("--sample_interval", type=int, default=500,
@@ -106,9 +104,7 @@ def handle_args():
         args.ali = True
     if (args.wass or args.ali):
         args.gan = True
-    if (args.gan):
-        args.human_cf = False
-    else:
+    if (not args.gan):
         args.classifier = True
 
     args.time = datetime.datetime.now()
@@ -255,6 +251,7 @@ def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, args, o
         if (batch_num % args.n_critic != 0): continue
         x, utts, labels = x.to(device), utts, labels.to(device)
         x_to_classify = x
+        if not args.human_cf: x_to_classify = x_to_classify[...,:IMG_DIM,:]
 
         if (model.cf and x_to_classify.shape[3] == IMG_DIM):
             # define q(z|x)
@@ -337,13 +334,13 @@ def test_log_reg_from_checkpoint(test_loader, tracker, args):
 
     log_reg_run_epoch(test_loader, test_model, "test", 0, 0, tracker, args, generator=generator, inference_net=inference_net)
 
-def get_causal_mnist_loaders(using_gan, cf, transform, train_on_mnist):
+def get_causal_mnist_loaders(using_gan, transform, train_on_mnist):
     train_mnist = mnist_dir_setup(test=False)
     test_mnist = mnist_dir_setup(test=True)
 
-    train = CausalMNIST("train", train_mnist, using_gan, cf=cf, transform=transform, train_on_mnist=train_on_mnist)
-    valid = CausalMNIST("validate", train_mnist, using_gan, cf=cf, transform=transform, train_on_mnist=train_on_mnist)
-    test = CausalMNIST("test", test_mnist, using_gan, cf=cf, transform=transform, train_on_mnist=train_on_mnist)
+    train = CausalMNIST("train", train_mnist, using_gan, transform=transform, train_on_mnist=train_on_mnist)
+    valid = CausalMNIST("validate", train_mnist, using_gan, transform=transform, train_on_mnist=train_on_mnist)
+    test = CausalMNIST("test", test_mnist, using_gan, transform=transform, train_on_mnist=train_on_mnist)
 
     train_loader = DataLoader(train, shuffle=True, batch_size=args.batch_size)
     valid_loader = DataLoader(valid, shuffle=True, batch_size=args.batch_size)
@@ -373,9 +370,10 @@ def combine_x_cf(x, z_inf, z_inf_mu, z_inf_sigma, sample_from, generator):
 
 # ANALYZING INFERENCE AFTER TESTING
 
-def collect_inferences(inference_net, test_loader):
+def collect_inferences(inference_net, test_loader, human_cf):
     for batch_num, (x, utts, labels) in enumerate(test_loader):
         x, utts, labels = x.to(device), utts, labels.to(device)
+        if (not human_cf): x = x[...,:IMG_DIM,:]
 
         # define q(z|x)
         z_inf_mu, z_inf_logvar = inference_net(x)
@@ -417,7 +415,6 @@ def add_imgs(cf_imgs, utt, utt_map, quick_class):
 
 # reference for code: https://matplotlib.org/3.1.1/gallery/lines_bars_and_markers/barchart.html#sphx-glr-gallery-lines-bars-and-markers-barchart-py
 def hist_bar_plot(utt_map, objects, x_axis, title, out_dir, train_dataset):
-    breakpoint()
     utt_map = {key : dict(zip(np.unique(utt_map[key], return_counts=True)[0], np.unique(utt_map[key], return_counts=True)[1])) for key in utt_map}
     fig, ax = plt.subplots()
     width = .08
@@ -446,7 +443,7 @@ if __name__ == "__main__":
     # set up classifier, data loaders, loss tracker
     classifier = LogisticRegression(args.human_cf or args.cf_inf).to(device)
     optimizer_c = torch.optim.Adam(classifier.parameters(), lr=args.lr, betas=(args.b1, args.b2))
-    train_dataset, train_loader, valid_loader, test_loader = get_causal_mnist_loaders(args.gan, args.human_cf, args.transform, args.train_on_mnist)
+    train_dataset, train_loader, valid_loader, test_loader = get_causal_mnist_loaders(args.gan, args.transform, args.train_on_mnist)
     tracker = LossTracker()
 
     generator = ConvGenerator(args.latent_dim, args.wass, args.train_on_mnist).to(device)
@@ -470,6 +467,8 @@ if __name__ == "__main__":
         # train
         for batch_num, (x, utts, labels) in enumerate(train_loader):
             x, utts, labels = x.to(device), utts, labels.to(device) # x.shape = (64, 1, 64, 64)
+            if not args.human_cf: x = x[...,:IMG_DIM,:]
+
             batch_size = x.size(0)
             
             if (args.gan):
@@ -568,13 +567,21 @@ if __name__ == "__main__":
     for index, (x, utts, labels) in enumerate(test_loader):
         # hist for ali
         x, labels = x.to(device), labels.to(device)
-        z_inf_mu, z_inf_logvar = inference_net(x)
+        x_forward_pass = x
+        if (not args.human_cf): x_forward_pass = x[...,:IMG_DIM,:]
+
+        z_inf_mu, z_inf_logvar = inference_net(x_forward_pass)
         z_inf = reparameterize(z_inf_mu, z_inf_logvar)
-        cfs = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.sample_from, generator).cpu().numpy()[:,0,...]
+        cfs = combine_x_cf(x_forward_pass, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.sample_from, generator).cpu().numpy()[:,0,...]
 
         for i, cf in enumerate(cfs):
             cf_imgs = np.split(cf, 5)
             add_imgs(cf_imgs, utts[i], inf_utt_map, quick_class)
+
+        # hist for true cfs (sanity check)
+        for i, cf in enumerate(x):
+            cf_imgs = np.split(cf, 5)
+            add_imgs(cf_imgs, utts[i], true_cf_utt_map, quick_class)
     
         # hist for gan (sanity check)
         x_gens = []
@@ -583,16 +590,15 @@ if __name__ == "__main__":
             x_gens.append(generator(z_prior).cpu().numpy()[:,0,...])
         
         for i, cf in enumerate(cfs):
-            cf_imgs = [x[i]] + [x_gen[i] for x_gen in x_gens]
+            cf_imgs = [x_forward_pass[i]] + [x_gen[i] for x_gen in x_gens]
             add_imgs(cf_imgs, utts[i], gan_utt_map, quick_class)
-
-        # hist for actual cfs (sanity check)
 
     # plot histogram data
     objects = tuple(train_dataset.label_nums)
     x_axis = np.arange(len(objects))
     hist_bar_plot(inf_utt_map, objects, x_axis, "ALI-hist.png", args.out_dir, train_dataset)
     hist_bar_plot(gan_utt_map, objects, x_axis, "GAN-hist.png", args.out_dir, train_dataset)
+    hist_bar_plot(true_cf_utt_map, objects, x_axis, "TRUE_CF-hist.png", args.out_dir, train_dataset)
 
     # CLASSIFIER ACCURACY
     if (args.classifier):
@@ -600,7 +606,7 @@ if __name__ == "__main__":
 
     # PCA
     print("finished testing. running PCA.")
-    means, all_utts = collect_inferences(inference_net, test_loader)
+    means, all_utts = collect_inferences(inference_net, test_loader, args.human_cf)
     run_pca(means, all_utts, False, []) # no tsne
     run_pca(means, all_utts, True, [])  # yes tsne
 

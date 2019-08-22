@@ -34,9 +34,10 @@ DATA_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), "../data")
 CAUSAL_MNIST_DIR = os.path.join(DATA_DIR, 'causal_mnist')
 
 class CausalMNIST(Dataset):
-    def __init__(self, split, mnist, using_gan, root=CAUSAL_MNIST_DIR,
-        cf=False, transform=True, train_on_mnist=False):
+    def __init__(self, split, mnist, using_gan, root=CAUSAL_MNIST_DIR, transform=True, train_on_mnist=False):
         super(CausalMNIST, self).__init__()
+        cf = True
+
         self.root = root
         self.mnist = copy.deepcopy(mnist)
         self.split = split
