@@ -342,9 +342,9 @@ def get_causal_mnist_loaders(using_gan, transform, train_on_mnist):
     valid = CausalMNIST("validate", train_mnist, using_gan, transform=transform, train_on_mnist=train_on_mnist)
     test = CausalMNIST("test", test_mnist, using_gan, transform=transform, train_on_mnist=train_on_mnist)
 
-    train_loader = DataLoader(train, shuffle=True, batch_size=args.batch_size)
-    valid_loader = DataLoader(valid, shuffle=True, batch_size=args.batch_size)
-    test_loader = DataLoader(test, shuffle=True, batch_size=args.batch_size)
+    train_loader = DataLoader(train, shuffle=True, batch_size=args.batch_size, num_workers=0)
+    valid_loader = DataLoader(valid, shuffle=True, batch_size=args.batch_size, num_workers=0)
+    test_loader = DataLoader(test, shuffle=True, batch_size=args.batch_size, num_workers=0)
     
     print("filled data loaders.")
 
@@ -467,7 +467,6 @@ if __name__ == "__main__":
         # train
         for batch_num, (x, utts, labels) in enumerate(train_loader):
             x, utts, labels = x.to(device), utts, labels.to(device) # x.shape = (64, 1, 64, 64)
-            breakpoint()
             if not args.human_cf: x = x[...,:IMG_DIM]
 
             batch_size = x.size(0)
