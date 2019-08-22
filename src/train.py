@@ -408,10 +408,6 @@ def run_pca(means, all_utts, use_tsne, kinds_to_ignore):
     plt.legend()
     plt.savefig(os.path.join(args.out_dir, 'ALI_{}{}.png'.format("TSNE" if use_tsne else "PCA", arg_str)))
 
-def get_test_batch(train_loader):
-    for i, (x, utts, labels) in enumerate(test_loader):
-        return x, utts, labels
-
 def add_imgs(cf_imgs, utt, utt_map, quick_class):
     if utt in utt_map:
         utt_map[utt] = np.hstack((utt_map[utt], np.rint(quick_class.predict(np.asarray(cf_imgs[1:]).reshape(4, 64*64)) )))
@@ -565,30 +561,30 @@ if __name__ == "__main__":
     quick_class = SklLogReg(random_state=args.seed, solver='liblinear', multi_class='ovr').fit(x,y)
 
     # get a batch of images and cfs
-    x, utts, labels = get_test_batch(train_loader)
-    x, labels = x.to(device), labels.to(device)
-    z_inf_mu, z_inf_logvar = inference_net(x)
-    z_inf = reparameterize(z_inf_mu, z_inf_logvar)
-    cfs = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.sample_from, generator).cpu().numpy()
-    cfs = cfs[:,0,...]
-
-    # histogram for ali
     inf_utt_map = {}
-    for i, cf in enumerate(cfs):
-        cf_imgs = np.split(cf, 5)
-        add_imgs(cf_imgs, utts[i], inf_utt_map, quick_class)
-    
-    # histogram for gan (sanity check)
-    x_gens = []
-    for i in range(4):
-        z_prior = torch.randn(batch_size, args.latent_dim, device=device)
-        x_gens.append(generator(z_prior).cpu().numpy()[:,0,...])
-
-    
     gan_utt_map = {}
-    for i, cf in enumerate(cfs):
-        cf_imgs = [x[i]] + [x_gen[i] for x_gen in x_gens]
-        add_imgs(cf_imgs, utts[i], gan_utt_map, quick_class)
+    for index, (x, utts, labels) in enumerate(test_loader):
+        breakpoint()
+        # hist for ali
+        x, labels = x.to(device), labels.to(device)
+        z_inf_mu, z_inf_logvar = inference_net(x)
+        z_inf = reparameterize(z_inf_mu, z_inf_logvar)
+        cfs = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.sample_from, generator).cpu().numpy()[:,0,...]
+
+        for i, cf in enumerate(cfs):
+            cf_imgs = np.split(cf, 5)
+            add_imgs(cf_imgs, utts[i], inf_utt_map, quick_class)
+    
+        # hist for gan (sanity check)
+        x_gens = []
+        for i in range(4):
+            z_prior = torch.randn(batch_size, args.latent_dim, device=device)
+            x_gens.append(generator(z_prior).cpu().numpy()[:,0,...])
+        
+        gan_utt_map = {}
+        for i, cf in enumerate(cfs):
+            cf_imgs = [x[i]] + [x_gen[i] for x_gen in x_gens]
+            add_imgs(cf_imgs, utts[i], gan_utt_map, quick_class)
 
     # plot histogram data
     objects = tuple(train_dataset.label_nums)
