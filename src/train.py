@@ -412,6 +412,31 @@ def get_test_batch(train_loader):
     for i, (x, utts, labels) in enumerate(test_loader):
         return x, utts, labels
 
+def add_imgs(cf_imgs, utt, utt_map, quick_class):
+    if utts[i] in inf_utt_map:
+        inf_utt_map[utts[i]] += np.rint(quick_class.predict(np.asarray(cf_imgs[1:]).reshape(4, 64*64)))
+    else:
+        inf_utt_map[utts[i]] = np.rint(quick_class.predict(np.asarray(cf_imgs[1:]).reshape(4, 64*64)))
+
+# reference for code: https://matplotlib.org/3.1.1/gallery/lines_bars_and_markers/barchart.html#sphx-glr-gallery-lines-bars-and-markers-barchart-py
+def hist_bar_plot(utt_map, objects, x_axis, title, out_dir):
+    utt_map = {key : dict(zip(np.unique(utt_map), return_counts=True)) for key in utt_map}
+    fig, ax = plt.subplots()
+    width = .08
+    for i, (label, dict_for_label) in enumerate(utt_map):
+        densities = [dict_for_label[obj] for obj in objects]
+        rects = ax.bar(x_axis - width + width*i, densities, width, align='edge', label=label)
+
+    
+    ax.set_xticks(x_axis)
+    ax.set_xtickslabels(objects)
+    ax.set_ylabel("Density")
+    ax.set_title("Distribution Over Cfs")
+    ax.legend()
+
+    plt.savefig(os.path.join(out_dir, title))
+
+
 if __name__ == "__main__":
     # basic setup from args
     args, arg_str = handle_args()
@@ -546,61 +571,29 @@ if __name__ == "__main__":
     cfs = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.sample_from, generator).cpu().numpy()
     cfs = cfs[:,0,...]
 
-    # create histogram
+    # histogram for ali
     inf_utt_map = {}
     for i, cf in enumerate(cfs):
         cf_imgs = np.split(cf, 5)
-        breakpoint()
-        if utts[i] in inf_utt_map:
-            inf_utt_map[utts[i]] += np.rint(quick_class.predict(np.asarray(cf_imgs[1:]).reshape(4, 64*64)))
-        else:
-            inf_utt_map[utts[i]] = np.rint(quick_class.predict(np.asarray(cf_imgs[1:]).reshape(4, 64*64)))
+        add_imgs(cf_imgs, utts[i], inf_utt_map, quick_class)
     
-    # sanity check: histogram for gans
-    z_prior = torch.randn(batch_size, args.latent_dim, device=device)
-    x_gen1 = generator(z_prior).cpu().numpy()[:,0,...]
-    z_prior = torch.randn(batch_size, args.latent_dim, device=device)
-    x_gen2 = generator(z_prior).cpu().numpy()[:,0,...]
-    z_prior = torch.randn(batch_size, args.latent_dim, device=device)
-    x_gen3 = generator(z_prior).cpu().numpy()[:,0,...]
-    z_prior = torch.randn(batch_size, args.latent_dim, device=device)
-    x_gen4 = generator(z_prior).cpu().numpy()[:,0,...]
+    # histogram for gan (sanity check)
+    x_gens = []
+    for i in range(4):
+        z_prior = torch.randn(batch_size, args.latent_dim, device=device)
+        x_gens.append(generator(z_prior).cpu().numpy()[:,0,...])
+
     
     gan_utt_map = {}
     for i, cf in enumerate(cfs):
-        cf_imgs = [x[i], x_gen1[i], x_gen2[i], x_gen3[i], x_gen4[i]]
-        if utts[i] in gan_utt_map:
-            gan_utt_map[utts[i]] += np.rint(quick_class.predict(np.asarray(cf_imgs[1:]).reshape(4, 64*64)))
-        else:
-            gan_utt_map[utts[i]] = np.rint(quick_class.predict(np.asarray(cf_imgs[1:]).reshape(4, 64*64))) 
-    breakpoint()
+        cf_imgs = [x[i]] + [x_gen[i] for x_gen in x_gens]
+        add_imgs(cf_imgs, utts[i], gan_utt_map, quick_class)
+
     # plot histogram data
     objects = tuple(set(list(inf_utt_map.values()) + list(gan_utt_map.values())))     
-    y_pos = np.arange(len(objects))
-
-    inf_utt_map = {key : dict(zip(np.unique(inf_utt_map), return_counts=True)) for key in inf_utt_map}
-    for i, label in enumerate(train_dataset.label_kinds):
-        color = (i*.2, i*.2, i*.2, .8)
-        densities = [inf_utt_map[label][obj] for obj in objects] # turn this into for loop
-        plt.bar(y_pos, densities, align='center', alpha=.5, color=c)
-        print(label_kinds)
-    plt.xticks(y_pos, objects)
-
-    plt.ylabel("Density")
-    plt.title("Distribution over cfs")
-    plt.savefig(os.path.join(args.out_dir, "ALI-hist.png")
-
-    gan_utt_map = {key : dict(zip(np.unique(gan_utt_map), return_counts=True)) for key in gan_utt_map}
-    for i, label in enumerate(train_dataset.label_kinds):
-        color = (i*.2, i*.2, i*.2, .8)
-        densities = [gan_utt_map[label][obj] for obj in objects] # turn this into for loop
-        plt.bar(y_pos, densities, align='center', alpha=.5, color=c)
-        print(label_kinds)
-    plt.xticks(y_pos, objects)
-
-    plt.ylabel("Density")
-    plt.title("Distribution over cfs")
-    plt.savefig(os.path.join(args.out_dir, "GAN-hist.png")
+    x_axis = np.arange(len(objects))
+    hist_bar_plot(inf_utt_map, objects, x_axis, "ALI-hist.png", args.out_dir)
+    hist_bar_plot(gan_utt_map, objects, x_axis, "GAN-hist.png", args.out_dir)
 
     # CLASSIFIER ACCURACY
     if (args.classifier):
