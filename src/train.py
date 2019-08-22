@@ -251,7 +251,7 @@ def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, args, o
         if (batch_num % args.n_critic != 0): continue
         x, utts, labels = x.to(device), utts, labels.to(device)
         x_to_classify = x
-        if not args.human_cf: x_to_classify = x_to_classify[...,:IMG_DIM,:]
+        if not args.human_cf: x_to_classify = x_to_classify[...,:IMG_DIM]
 
         if (model.cf and x_to_classify.shape[3] == IMG_DIM):
             # define q(z|x)
@@ -373,7 +373,7 @@ def combine_x_cf(x, z_inf, z_inf_mu, z_inf_sigma, sample_from, generator):
 def collect_inferences(inference_net, test_loader, human_cf):
     for batch_num, (x, utts, labels) in enumerate(test_loader):
         x, utts, labels = x.to(device), utts, labels.to(device)
-        if (not human_cf): x = x[...,:IMG_DIM,:]
+        if (not human_cf): x = x[...,:IMG_DIM]
 
         # define q(z|x)
         z_inf_mu, z_inf_logvar = inference_net(x)
@@ -468,7 +468,7 @@ if __name__ == "__main__":
         for batch_num, (x, utts, labels) in enumerate(train_loader):
             x, utts, labels = x.to(device), utts, labels.to(device) # x.shape = (64, 1, 64, 64)
             breakpoint()
-            if not args.human_cf: x = x[...,:IMG_DIM,:]
+            if not args.human_cf: x = x[...,:IMG_DIM]
 
             batch_size = x.size(0)
             
@@ -569,7 +569,7 @@ if __name__ == "__main__":
         # hist for ali
         x, labels = x.to(device), labels.to(device)
         x_forward_pass = x
-        if (not args.human_cf): x_forward_pass = x[...,:IMG_DIM,:]
+        if (not args.human_cf): x_forward_pass = x[...,:IMG_DIM]
 
         z_inf_mu, z_inf_logvar = inference_net(x_forward_pass)
         z_inf = reparameterize(z_inf_mu, z_inf_logvar)
