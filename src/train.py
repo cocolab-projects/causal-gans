@@ -75,7 +75,7 @@ def handle_args():
     parser.add_argument("--b2", type=float, default=0.999,
                         help="adam: decay of first order momentum of gradient")
     # GAN-specific
-    parser.add_argument(--"human_cf", action='store_true')
+    parser.add_argument("--human_cf", action='store_true')
     parser.add_argument("--latent_dim", type=int, default=4,
                         help="dimensionality of the latent space")
     parser.add_argument("--sample_interval", type=int, default=500,
@@ -467,6 +467,7 @@ if __name__ == "__main__":
         # train
         for batch_num, (x, utts, labels) in enumerate(train_loader):
             x, utts, labels = x.to(device), utts, labels.to(device) # x.shape = (64, 1, 64, 64)
+            breakpoint()
             if not args.human_cf: x = x[...,:IMG_DIM,:]
 
             batch_size = x.size(0)
