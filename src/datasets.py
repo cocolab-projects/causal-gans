@@ -80,7 +80,8 @@ class CausalMNIST(Dataset):
 
         self.imgs = [self.img_transform(Image.fromarray(pt[0])) for pt in scenarios]
         self.labels = [pt[1] for pt in scenarios]
-        self.label_kinds = set(labels)
+        self.label_kinds = set(self.labels)
+        self.label_nums = np.arange(0.0, 4.0, 1.0)
 
     def __getitem__(self, index):
         if (self.train_on_mnist):
@@ -95,10 +96,10 @@ class CausalMNIST(Dataset):
             return self.length
 
     def label_to_num(self, label):
-        if (label == str(NUM1)): return 1.0
-        elif (label == str(NUM2)): return 2.0
-        elif (str(NUM1) in label and str(NUM2) in label): return 3.0
-        else: return 0.0
+        if (str(NUM1) in label and str(NUM2) in label): return self.label_nums[0]
+        elif (str(NUM1) in label): return self.label_nums[1]
+        elif (str(NUM2) in label): return self.label_nums[2]
+        else: return self.label_nums[3]
 
     def np_train_data(self):
         x = np.asarray([np.asarray(img) for img in self.imgs])

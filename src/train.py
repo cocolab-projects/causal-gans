@@ -413,17 +413,18 @@ def get_test_batch(train_loader):
         return x, utts, labels
 
 def add_imgs(cf_imgs, utt, utt_map, quick_class):
-    if utts[i] in inf_utt_map:
-        inf_utt_map[utts[i]] += np.rint(quick_class.predict(np.asarray(cf_imgs[1:]).reshape(4, 64*64)))
+    if utt in utt_map:
+        utt_map[utt] = np.hstack((utt_map[utt], np.rint(quick_class.predict(np.asarray(cf_imgs[1:]).reshape(4, 64*64)) )))
     else:
-        inf_utt_map[utts[i]] = np.rint(quick_class.predict(np.asarray(cf_imgs[1:]).reshape(4, 64*64)))
+        utt_map[utt] = np.rint(quick_class.predict(np.asarray(cf_imgs[1:]).reshape(4, 64*64)))
 
 # reference for code: https://matplotlib.org/3.1.1/gallery/lines_bars_and_markers/barchart.html#sphx-glr-gallery-lines-bars-and-markers-barchart-py
 def hist_bar_plot(utt_map, objects, x_axis, title, out_dir):
-    utt_map = {key : dict(zip(np.unique(utt_map), return_counts=True)) for key in utt_map}
+    breakpoint()
+    utt_map = {key : dict(zip(np.unique(utt_map[key], return_counts=True)[0], np.unique(utt_map[key], return_counts=True)[1])) for key in utt_map}
     fig, ax = plt.subplots()
     width = .08
-    for i, (label, dict_for_label) in enumerate(utt_map):
+    for i, (label, dict_for_label) in enumerate(utt_map.items()):
         densities = [dict_for_label[obj] for obj in objects]
         rects = ax.bar(x_axis - width + width*i, densities, width, align='edge', label=label)
 
@@ -590,7 +591,7 @@ if __name__ == "__main__":
         add_imgs(cf_imgs, utts[i], gan_utt_map, quick_class)
 
     # plot histogram data
-    objects = tuple(set(list(inf_utt_map.values()) + list(gan_utt_map.values())))     
+    objects = tuple(train_dataset.label_nums)
     x_axis = np.arange(len(objects))
     hist_bar_plot(inf_utt_map, objects, x_axis, "ALI-hist.png", args.out_dir)
     hist_bar_plot(gan_utt_map, objects, x_axis, "GAN-hist.png", args.out_dir)
