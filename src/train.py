@@ -4,7 +4,6 @@ train.py
 Much credit for GAN training goes to eriklindernoren, mhw32
 
 TODO: add support for training with human-generated cfs
-TODO: and show the true distribution
 
 @author mmosse19
 @version August 2019
@@ -35,7 +34,7 @@ from torchvision.utils import save_image
 import torchvision.utils as utils
 
 # from this dir
-from generate import (mnist_dir_setup, NUM1, NUM2, IMG_DIM)
+from generate import (mnist_dir_setup, NUM1, NUM2, IMG_DIM, TOTAL_NUM_WORLDS)
 from datasets import (CausalMNIST)
 from models import (LogisticRegression, ConvGenerator, ConvDiscriminator, InferenceNet)
 from utils import (LossTracker, AverageMeter, save_checkpoint, free_params, frozen_params, to_percent, viewable_img, reparameterize, latent_cfs, args_to_string)
@@ -52,7 +51,7 @@ def handle_args():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--out_dir', type=str,
-                        help='where to save checkpoints',default="/mnt/fs5/mmosse19/causal-gans/progress")
+                        help='where to save checkpoints',default="/mnt/fs5/mmosse19/causal-gans")
     parser.add_argument('--seed', type=int, default=42,
                         help='random seed [default: 42]')
     parser.add_argument('--resample_eps', type=float, default=1e-3,
@@ -120,7 +119,7 @@ def handle_args():
 # CHECKPOINTS AND PROGRESS WHILE TRAINING
 
 def load_checkpoint(folder, arg_str):
-    filename = 'model_best{}.pth.tar'.format(arg_str)
+    filename = 'model_best.pth.tar'
     checkpoint = torch.load(os.path.join(folder, filename))
     return checkpoint['epoch'], checkpoint['classifier_state'], checkpoint['generator_state'], checkpoint['inference_net_state'], checkpoint['tracker'], checkpoint['cached_args']
 
@@ -250,8 +249,8 @@ def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, args, o
     for batch_num, (x, utts, labels) in enumerate(loader):
         if (batch_num % args.n_critic != 0): continue
         x, utts, labels = x.to(device), utts, labels.to(device)
+        if not args.human_cf: x = x[...,:IMG_DIM]
         x_to_classify = x
-        if not args.human_cf: x_to_classify = x_to_classify[...,:IMG_DIM]
 
         if (model.cf and x_to_classify.shape[3] == IMG_DIM):
             # define q(z|x)
@@ -405,7 +404,7 @@ def run_pca(means, all_utts, use_tsne, kinds_to_ignore):
         plt.scatter(means_i[:, 0], means_i[:, 1], color=colors[i], 
                     label=kind, alpha=0.3, edgecolors='none')
     plt.legend()
-    plt.savefig(os.path.join(args.out_dir, 'ALI_{}{}.png'.format("TSNE" if use_tsne else "PCA", arg_str)))
+    plt.savefig(os.path.join(args.out_dir, 'ALI_{}.png'.format("TSNE" if use_tsne else "PCA")))
 
 def add_imgs(cf_imgs, utt, utt_map, quick_class):
     if utt in utt_map:
@@ -414,12 +413,21 @@ def add_imgs(cf_imgs, utt, utt_map, quick_class):
         utt_map[utt] = np.rint(quick_class.predict(np.asarray(cf_imgs[1:]).reshape(4, 64*64)))
 
 # reference for code: https://matplotlib.org/3.1.1/gallery/lines_bars_and_markers/barchart.html#sphx-glr-gallery-lines-bars-and-markers-barchart-py
-def hist_bar_plot(utt_map, objects, x_axis, title, out_dir, train_dataset):
+def hist_bar_plot(utt_map, title, out_dir, train_dataset):
+    title = "hist_{}.png".format(title)
     utt_map = {key : dict(zip(np.unique(utt_map[key], return_counts=True)[0], np.unique(utt_map[key], return_counts=True)[1])) for key in utt_map}
+    objects = tuple(train_dataset.label_nums)
+    
+    for i, (utt, dict_for_utt) in enumerate(utt_map.items()):
+        for obj in objects:
+            if obj not in dict_for_utt:
+                dict_for_utt[object] = 0
+
+    x_axis = np.arange(len(objects))
     fig, ax = plt.subplots()
     width = .08
     for i, (label, dict_for_label) in enumerate(utt_map.items()):
-        densities = [dict_for_label[obj] for obj in objects]
+        densities = [dict_for_label[obj] for obj in dict_for_label]
         rects = ax.bar(x_axis - width + width*i, densities, width, align='edge', label=(label if label else "empty"))
     
     ax.set_xticks(x_axis)
@@ -556,49 +564,49 @@ if __name__ == "__main__":
 
     # HISTOGRAM
     # obtain a classifier
-    x, y = train_dataset.np_train_data()
-    x = x[:,0,...].reshape(x[:,0,...].shape[0], 64*64)
-    quick_class = SklLogReg(random_state=args.seed, solver='liblinear', multi_class='ovr').fit(x,y)
+    if not args.human_cf: 
+        x, y = train_dataset.np_train_data()
+        x = x[...,:IMG_DIM]
+        x = x[:,0,...].reshape(x[:,0,...].shape[0], 64*64)
+        quick_class = SklLogReg(random_state=args.seed, solver='liblinear', multi_class='ovr').fit(x,y)
 
-    # get a batch of images and cfs
-    inf_utt_map = {}
-    gan_utt_map = {}
-    true_cf_utt_map = {}
-    for index, (x, utts, labels) in enumerate(test_loader):
-        # hist for ali
-        x, labels = x.to(device), labels.to(device)
-        x_forward_pass = x
-        if (not args.human_cf): x_forward_pass = x[...,:IMG_DIM]
+        # get a batch of images and cfs
+        inf_utt_map = {}
+        gan_utt_map = {}
+        true_cf_utt_map = {}
+        for index, (x, utts, labels) in enumerate(test_loader):
+            # hist for ali
+            x, labels = x.to(device), labels.to(device)
+            x_forward_pass = x
+            if (not args.human_cf): x_forward_pass = x[...,:IMG_DIM]
 
-        z_inf_mu, z_inf_logvar = inference_net(x_forward_pass)
-        z_inf = reparameterize(z_inf_mu, z_inf_logvar)
-        cfs = combine_x_cf(x_forward_pass, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.sample_from, generator).cpu().numpy()[:,0,...]
+            z_inf_mu, z_inf_logvar = inference_net(x_forward_pass)
+            z_inf = reparameterize(z_inf_mu, z_inf_logvar)
+            cfs = combine_x_cf(x_forward_pass, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.sample_from, generator).cpu().numpy()[:,0,...]
 
-        for i, cf in enumerate(cfs):
-            cf_imgs = np.split(cf, 5)
-            add_imgs(cf_imgs, utts[i], inf_utt_map, quick_class)
+            for i, cf in enumerate(cfs):
+                cf_imgs = np.split(cf, TOTAL_NUM_WORLDS)
+                add_imgs(cf_imgs, utts[i], inf_utt_map, quick_class)
 
-        # hist for true cfs (sanity check)
-        for i, cf in enumerate(x):
-            cf_imgs = np.split(cf, 5)
-            add_imgs(cf_imgs, utts[i], true_cf_utt_map, quick_class)
-    
-        # hist for gan (sanity check)
-        x_gens = []
-        for i in range(4):
-            z_prior = torch.randn(batch_size, args.latent_dim, device=device)
-            x_gens.append(generator(z_prior).cpu().numpy()[:,0,...])
+            # hist for true cfs (sanity check)
+            for i, cf in enumerate(x[:,0,...].cpu().numpy()):
+                cf_imgs = np.split(cf, TOTAL_NUM_WORLDS, axis=1)
+                add_imgs(cf_imgs, utts[i], true_cf_utt_map, quick_class)
         
-        for i, cf in enumerate(cfs):
-            cf_imgs = [x_forward_pass[i]] + [x_gen[i] for x_gen in x_gens]
-            add_imgs(cf_imgs, utts[i], gan_utt_map, quick_class)
+            # hist for gan (sanity check)
+            x_gens = []
+            for i in range(TOTAL_NUM_WORLDS-1):
+                z_prior = torch.randn(batch_size, args.latent_dim, device=device)
+                x_gens.append(generator(z_prior).cpu().numpy()[:,0,...])
+            
+            for i, cf in enumerate(cfs):
+                cf_imgs = [x_forward_pass[:,0,...][i]] + [x_gen[i] for x_gen in x_gens]
+                add_imgs(cf_imgs, utts[i], gan_utt_map, quick_class)
 
-    # plot histogram data
-    objects = tuple(train_dataset.label_nums)
-    x_axis = np.arange(len(objects))
-    hist_bar_plot(inf_utt_map, objects, x_axis, "ALI-hist.png", args.out_dir, train_dataset)
-    hist_bar_plot(gan_utt_map, objects, x_axis, "GAN-hist.png", args.out_dir, train_dataset)
-    hist_bar_plot(true_cf_utt_map, objects, x_axis, "TRUE_CF-hist.png", args.out_dir, train_dataset)
+        # plot histogram data
+        hist_bar_plot(inf_utt_map, "ALI", args.out_dir, train_dataset)
+        hist_bar_plot(gan_utt_map, "GAN", args.out_dir, train_dataset)
+        hist_bar_plot(true_cf_utt_map, "TRUE_CF", args.out_dir, train_dataset)
 
     # CLASSIFIER ACCURACY
     if (args.classifier):
