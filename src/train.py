@@ -101,6 +101,7 @@ def handle_args():
     if (args.cf_inf):
         args.classifier = True
         args.ali = True
+        args.wass = True
     if (args.wass or args.ali):
         args.gan = True
     if (not args.gan):
