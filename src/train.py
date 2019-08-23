@@ -42,8 +42,8 @@ from utils import (LossTracker, AverageMeter, save_checkpoint, free_params, froz
 START_INCREASE_CLASS_WT = 25
 MAX_CLASS_WT = 1.0
 SUPRESS_PRINT_STATEMENTS = True
-LOSS_KINDS = {  "causal_loss_c": lambda utt: "causal" in utt,                     # find loss on images labeled '1' (i.e., causal images)
-                "both_nums_loss_c": lambda utt: str(NUM1) in utt and str(NUM2) in utt}   # find loss on all images that contain both NUM1 and NUM2
+LOSS_KINDS = {  "causal_loss_c": lambda utt: "causal" in utt,
+                "both_nums_loss_c": lambda utt: str(NUM1) in utt and str(NUM2) in utt}
 
 # ARGUMENTS
 
@@ -65,7 +65,7 @@ def handle_args():
                         help='learning rate [default: 2e-4]')
     parser.add_argument('--lr_d', type=float, default=1e-5,
                         help='discriminator learning rate [default: 1e-5]')
-    parser.add_argument('--epochs', type=int, default=201,
+    parser.add_argument('--epochs', type=int, default=51,
                         help='number of training epochs [default: 101]')
     parser.add_argument('--cuda', action='store_false',
                         help='Enable cuda')
@@ -365,7 +365,7 @@ def combine_x_cf(x, z_inf, z_inf_mu, z_inf_sigma, sample_from, generator):
 
     x_to_classify = [torch.cat(cfs, 0).unsqueeze(0) for cfs in x_to_classify]
 
-    return torch.stack(x_to_classify)
+    return torch.stack(x_to_classify) # TODO: stack along a different dim
 
 # ANALYZING INFERENCE AFTER TESTING
 
@@ -474,7 +474,7 @@ if __name__ == "__main__":
         pbar = tqdm(total = len(train_loader))
         # train
         for batch_num, (x, utts, labels) in enumerate(train_loader):
-            x, utts, labels = x.to(device), utts, labels.to(device) # x.shape = (64, 1, 64, 64)
+            x, utts, labels = x.to(device), utts, labels.to(device)
             if not args.human_cf: x = x[...,:IMG_DIM]
 
             batch_size = x.size(0)
@@ -490,7 +490,7 @@ if __name__ == "__main__":
                 z_prior = torch.randn(batch_size, args.latent_dim, device=device)
                 
                 # define q(z|x)
-                z_inf_mu, z_inf_logvar = inference_net(x) # note: x may not be appropriate shape
+                z_inf_mu, z_inf_logvar = inference_net(x)
 
                 # z_inf ~ q(z|x)
                 z_inf = reparameterize(z_inf_mu, z_inf_logvar)
@@ -524,7 +524,6 @@ if __name__ == "__main__":
 
                 if (args.classifier):
                     x_to_classify = x
-
                     if (args.cf_inf):
                         # x_to_classify ~ q(x | cf(z_inf))
                         x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.sample_from, generator)
@@ -564,16 +563,14 @@ if __name__ == "__main__":
 
     # HISTOGRAM
     # obtain a classifier
-    if not args.human_cf: 
+    if args.cf_inf:
+        print("running histograms")
         x, y = train_dataset.np_train_data()
-        x = x[...,:IMG_DIM]
-        x = x[:,0,...].reshape(x[:,0,...].shape[0], 64*64)
+        x = x[:,0,...,:IMG_DIM].reshape(x[:,0,...,:IMG_DIM].shape[0], 64*64)
         quick_class = SklLogReg(random_state=args.seed, solver='liblinear', multi_class='ovr').fit(x,y)
-
+        print("trained sklearn classifier for histograms.")
         # get a batch of images and cfs
-        inf_utt_map = {}
-        gan_utt_map = {}
-        true_cf_utt_map = {}
+        inf_utt_map, gan_utt_map, true_cf_utt_map = {}, {}, {}
         for index, (x, utts, labels) in enumerate(test_loader):
             # hist for ali
             x, labels = x.to(device), labels.to(device)
@@ -602,22 +599,24 @@ if __name__ == "__main__":
             for i, cf in enumerate(cfs):
                 cf_imgs = [x_forward_pass[:,0,...][i]] + [x_gen[i] for x_gen in x_gens]
                 add_imgs(cf_imgs, utts[i], gan_utt_map, quick_class)
-
+        print("retrived data for histograms.")
         # plot histogram data
         hist_bar_plot(inf_utt_map, "ALI", args.out_dir, train_dataset)
         hist_bar_plot(gan_utt_map, "GAN", args.out_dir, train_dataset)
         hist_bar_plot(true_cf_utt_map, "TRUE_CF", args.out_dir, train_dataset)
+        print("finished histograms.")
 
     # CLASSIFIER ACCURACY
     if (args.classifier):
         test_log_reg_from_checkpoint(test_loader, tracker, args)
 
     # PCA
-    print("finished testing. running PCA.")
-    means, all_utts = collect_inferences(inference_net, test_loader, args.human_cf)
-    run_pca(means, all_utts, False, []) # no tsne
-    run_pca(means, all_utts, True, [])  # yes tsne
+    if args.ali:
+        print("running PCA.")
+        means, all_utts = collect_inferences(inference_net, test_loader, args.human_cf)
+        run_pca(means, all_utts, False, []) # no tsne
+        run_pca(means, all_utts, True, [])  # yes tsne
 
-    print("finished PCA") 
+        print("finished PCA") 
 
     breakpoint()
