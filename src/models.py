@@ -14,13 +14,29 @@ from utils import get_conv_output_dim
 from generate import (TOTAL_NUM_WORLDS, MNIST_IMG_DIM)
 
 IMG_DIM = MNIST_IMG_DIM*2
+class LatentMLP(nn.Module):
+    def __init__(self, latent_dim=4, input_dim =4, output_dim=4*4):
+        super(LatentMLP, self).__init__()
+        self.latent_dim = latent_dim
+        self.l = nn.Sequential(
+            nn.Linear(input_dim, input_dim),
+            nn.LeakyReLU(0.1, inplace=True),
+
+            nn.Linear(input_dim, output_dim),
+            nn.LeakyReLU(0.1, inplace=True),
+
+            nn.Linear(output_dim, output_dim))
+
+    def forward(self, z):
+        cf_z = self.l(z)
+        return cf_z
 
 class LogisticRegression(nn.Module):
     def __init__(self, cf, channels=1, input_dim=IMG_DIM**2, output_dim=1):
         super(LogisticRegression, self).__init__()
         if (cf): input_dim *=TOTAL_NUM_WORLDS
-        self.linear = torch.nn.Linear(input_dim, output_dim)
-        self.criterion = torch.nn.BCELoss()
+        self.linear = nn.Linear(input_dim, output_dim)
+        self.criterion = nn.BCELoss()
         self.cf = cf
 
     def forward(self, img):

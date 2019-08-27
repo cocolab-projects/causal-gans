@@ -3,6 +3,8 @@ train.py
 
 Much credit for GAN training goes to eriklindernoren, mhw32
 
+TODO: train with a bunnch of different classification weights; separately, set weight for GAN loss to be 0; train WGAN?ALI to completion, load from checkpoint->load them up, and then train WGAN/classifier wrt class loss;
+TODO: plot N(O,1) with each of four dimensions of z_cf^i for i in [4]. then do the same with N(0,1) replaced by N(\mu_inf, sigma_inf^2)
 TODO: add support for training with human-generated cfs
 
 @author mmosse19
@@ -36,7 +38,7 @@ import torchvision.utils as utils
 # from this dir
 from generate import (mnist_dir_setup, NUM1, NUM2, IMG_DIM, TOTAL_NUM_WORLDS)
 from datasets import (CausalMNIST)
-from models import (LogisticRegression, ConvGenerator, ConvDiscriminator, InferenceNet)
+from models import (LogisticRegression, ConvGenerator, ConvDiscriminator, InferenceNet, LatentMLP)
 from utils import (LossTracker, AverageMeter, save_checkpoint, free_params, frozen_params, to_percent, viewable_img, reparameterize, latent_cfs, args_to_string)
 
 START_INCREASE_CLASS_WT = 25
@@ -93,6 +95,7 @@ def handle_args():
     parser.add_argument("--cf_inf", action='store_true')
     parser.add_argument("--sample_from", type=str, default="post")
     parser.add_argument("--gradual_wt", action='store_true')
+    parser.add_argument("--lrn_perturb", action='store_true')
 
     args = parser.parse_args()
 
@@ -122,7 +125,7 @@ def handle_args():
 def load_checkpoint(folder, arg_str):
     filename = 'model_best.pth.tar'
     checkpoint = torch.load(os.path.join(folder, filename))
-    return checkpoint['epoch'], checkpoint['classifier_state'], checkpoint['generator_state'], checkpoint['inference_net_state'], checkpoint['tracker'], checkpoint['cached_args']
+    return checkpoint['epoch'], checkpoint['classifier_state'], checkpoint['generator_state'], checkpoint['inference_net_state'], checkpoint['perturb_mlp_state'], checkpoint['tracker'], checkpoint['cached_args']
 
 def save_losses(tracker, kind, args):
     # save tracker loss avgs (for each epoch) to file
@@ -242,7 +245,7 @@ def log_reg_run_batch(batch_num, num_batches, imgs, utts, labels, model, mode, e
     return loss
 
 
-def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, args, optimizer, generator, inference_net, sample_from):
+def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, args, optimizer, generator, inference_net, perturb_mlp, sample_from):
     arg_str = args_to_string(args)
 
     set_mode([model], mode)
@@ -253,7 +256,7 @@ def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, args, o
         if not args.human_cf: x = x[...,:IMG_DIM]
         x_to_classify = x
 
-        if (model.cf and x_to_classify.shape[3] == IMG_DIM):
+        if (args.cf_inf):
             # define q(z|x)
             z_inf_mu, z_inf_logvar = inference_net(x)
 
@@ -261,7 +264,7 @@ def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, args, o
             z_inf = reparameterize(z_inf_mu, z_inf_logvar)
 
             # x_to_classify ~ q(x | cf(z_inf))
-            x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), sample_from, generator)
+            x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.lrn_perturb, sample_from, generator, perturb_mlp)
         
         if (mode != "train"):
             with torch.no_grad():
@@ -271,9 +274,9 @@ def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, args, o
             descend([optimizer], loss)
     
 # model is log reg model
-def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, args, optimizer = None, generator=None, inference_net=None):
+def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, args, optimizer = None, generator=None, inference_net=None, perturb_mlp=None):
     # run all batches
-    log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, args, optimizer, generator, inference_net, args.sample_from)
+    log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, args, optimizer, generator, inference_net, perturb_mlp, args.sample_from)
     
     # get avg loss for this epoch, save best loss if validating
     avg_loss = tracker["{}_loss_c".format(mode)][epoch].avg
@@ -281,6 +284,7 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, args, optimiz
     # get generator state
     generator_state = generator.state_dict() if generator else None
     inference_net_state = inference_net.state_dict() if inference_net else None
+    mlp_state = perturb_mlp.state_dict() if perturb_mlp else None
 
     if (mode == "validate"):
         tracker.best_loss = min(abs(avg_loss), abs(tracker.best_loss))
@@ -290,6 +294,7 @@ def log_reg_run_epoch(loader, model, mode, epoch, epochs, tracker, args, optimiz
             'classifier_state': model.state_dict(),
             'generator_state': generator_state,
             'inference_net_state': inference_net_state,
+            'perturb_mlp_state': mlp_state,
             'tracker': tracker,
             'cached_args': args,
         }, tracker.best_loss == avg_loss, args_to_string(args), folder = args.out_dir)
@@ -322,17 +327,19 @@ def run_log_reg(model, optimizer, train_loader, valid_loader, test_loader, args,
     test_log_reg_from_checkpoint(test_loader, tracker, args)
 
 def test_log_reg_from_checkpoint(test_loader, tracker, args):
-    epoch, classifier_state, generator_state, inference_net_state, tracker, cached_args = load_checkpoint(args.out_dir, args_to_string(args))
+    epoch, classifier_state, generator_state, inference_net_state, mlp_state, tracker, cached_args = load_checkpoint(args.out_dir, args_to_string(args))
 
     test_model = LogisticRegression(args.cf_inf or args.human_cf).to(device)
     generator = ConvGenerator(cached_args.latent_dim, cached_args.wass, cached_args.train_on_mnist).to(device)
     inference_net = InferenceNet(1, 64, cached_args.latent_dim).to(device)
+    perturb_mlp = LatentMLP(latent_dim=cached_args.latent_dim).to(device)
 
     test_model.load_state_dict(classifier_state)
     if (generator_state): generator.load_state_dict(generator_state)
     if (inference_net_state): inference_net.load_state_dict(inference_net_state)
+    if (mlp_state): perturb_mlp.load_state_dict(mlp_state)
 
-    log_reg_run_epoch(test_loader, test_model, "test", 0, 0, tracker, args, generator=generator, inference_net=inference_net)
+    log_reg_run_epoch(test_loader, test_model, "test", 0, 0, tracker, args, generator=generator, inference_net=inference_net, perturb_mlp=perturb_mlp)
 
 def get_causal_mnist_loaders(using_gan, transform, train_on_mnist):
     train_mnist = mnist_dir_setup(test=False)
@@ -350,23 +357,31 @@ def get_causal_mnist_loaders(using_gan, transform, train_on_mnist):
 
     return train, train_loader, valid_loader, test_loader
 
-def combine_x_cf(x, z_inf, z_inf_mu, z_inf_sigma, sample_from, generator):
+def combine_x_cf(x, z_inf, z_inf_mu, z_inf_sigma, lrn_perturb, sample_from, generator, perturb_mlp):
     latent_dim = z_inf.size(1)
-    x_to_classify = [[img.squeeze()] for img in x]
-    for dim in range(latent_dim):
-        # z_cf = z_inf, with one dim ~ sample_from
-        z_cf = latent_cfs(dim, z_inf, z_inf_mu, z_inf_sigma, sample_from)
+    if (lrn_perturb):
+        z_cf = perturb_mlp(z_inf_mu)
+        z_cf = torch.chunk(perturb_mlp(z_inf_mu), latent_dim, dim=1)
+        x_cf = [generator(z) for z in z_cf]
+        x_to_classify = [x] + x_cf
+        x_to_classify = torch.cat(x_to_classify, dim=latent_dim-1)
+        return x_to_classify
+    else:
+        x_to_classify = [[img.squeeze()] for img in x]
+        for dim in range(latent_dim):
+            # z_cf = z_inf, with one dim ~ sample_from
+            z_cf = latent_cfs(dim, z_inf, z_inf_mu, z_inf_sigma, sample_from)
 
-        # x_cf ~ p(x | z_cf)
-        x_cf = generator(z_cf)
+            # x_cf ~ p(x | z_cf)
+            x_cf = generator(z_cf)
 
-        # append x_cf to x_to_classify
-        for i, img in enumerate(x_to_classify):
-            x_to_classify[i].append(x_cf[i].squeeze())
+            # append x_cf to x_to_classify
+            for i, img in enumerate(x_to_classify):
+                x_to_classify[i].append(x_cf[i].squeeze())
 
-    x_to_classify = [torch.cat(cfs, 0).unsqueeze(0) for cfs in x_to_classify]
+        x_to_classify = [torch.cat(cfs, 0).unsqueeze(0) for cfs in x_to_classify] # TODO: cat along dim 1
 
-    return torch.stack(x_to_classify) # TODO: stack along a different dim
+        return torch.stack(x_to_classify)
 
 # ANALYZING INFERENCE AFTER TESTING
 
@@ -420,9 +435,13 @@ def hist_bar_plot(utt_map, title, out_dir, train_dataset):
     objects = tuple(train_dataset.label_nums)
     
     for i, (utt, dict_for_utt) in enumerate(utt_map.items()):
+        np.sum([*dict_for_utt.values()])
+        utt_map[utt] = {label: count/num_cfs for label, count in dict_for_utt.items()}
+
+    for i, (utt, dict_for_utt) in enumerate(utt_map.items()):
         for obj in objects:
             if obj not in dict_for_utt:
-                dict_for_utt[object] = 0
+                utt_map[utt][object] = 0
 
     x_axis = np.arange(len(objects))
     fig, ax = plt.subplots()
@@ -458,20 +477,23 @@ if __name__ == "__main__":
     generator = ConvGenerator(args.latent_dim, args.wass, args.train_on_mnist).to(device)
     inference_net = InferenceNet(1, 64, args.latent_dim).to(device)
     discriminator = ConvDiscriminator(args.wass, args.train_on_mnist, args.ali, args.latent_dim).to(device)
+    perturb_mlp = LatentMLP(latent_dim=args.latent_dim).to(device)
     loss_wts = []
     
     optimizer_g = generator.optimizer(chain(generator.parameters(),
-                                            inference_net.parameters()),
+                                            inference_net.parameters(),
+                                            perturb_mlp.parameters()),
                                             lr=args.lr)
     optimizer_d = discriminator.optimizer(discriminator.parameters(), lr=args.lr_d)
 
     print("set up models/optimizers. now training...")
 
     if (args.classifier): classifier_loss_weight = 0.0 if args.gradual_wt else MAX_CLASS_WT
-
+    
     # train (and validate, if args.classifier)
     for epoch in range(args.epochs):
-        set_mode([generator, discriminator, inference_net, classifier], "train")
+
+        set_mode([generator, discriminator, inference_net, classifier, perturb_mlp], "train")
         pbar = tqdm(total = len(train_loader))
         # train
         for batch_num, (x, utts, labels) in enumerate(train_loader):
@@ -479,9 +501,9 @@ if __name__ == "__main__":
             if not args.human_cf: x = x[...,:IMG_DIM]
 
             batch_size = x.size(0)
-            
+
             if (args.gan):
-                set_params([generator, inference_net, classifier, discriminator], [discriminator])
+                set_params([generator, inference_net, classifier, discriminator, perturb_mlp], [discriminator])
 
                 # adversarial ground truths
                 valid = torch.ones(x.size(0), 1, device=device)
@@ -509,7 +531,7 @@ if __name__ == "__main__":
             # train generator (and classifier if necessary); TODO: execute unconditionally if GAN and periodically if WGAN
             if batch_num % args.n_critic == 0:
 
-                set_params([generator, inference_net, classifier, discriminator], [generator, inference_net, classifier])
+                set_params([generator, inference_net, classifier, discriminator, perturb_mlp], [generator, inference_net, classifier, perturb_mlp])
                 total_loss = 0
                 optimizers = []
 
@@ -527,14 +549,15 @@ if __name__ == "__main__":
                     x_to_classify = x
                     if (args.cf_inf):
                         # x_to_classify ~ q(x | cf(z_inf))
-                        x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.sample_from, generator)
-                        if (batch_num == 0): save_imgs_from_g(x_to_classify, epoch, args, True)
+                        x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.lrn_perturb, args.sample_from, generator, perturb_mlp)
+                        if (batch_num == 0): 
+                            save_imgs_from_g(x_to_classify, epoch, args, True)
 
                     loss_c = log_reg_run_batch(batch_num, len(train_loader), x_to_classify, utts, labels, classifier, "train", epoch, args.epochs, tracker, arg_str)
                     total_loss += classifier_loss_weight*loss_c 
                     classifier_loss_weight += update_classifier_loss_weight(classifier_loss_weight, loss_wts, args)
                     optimizers.append(optimizer_c)
-
+    
                 descend(optimizers, total_loss)
                 tracker.update(epoch, "train_loss_total", total_loss.item(), batch_size)
 
@@ -546,21 +569,35 @@ if __name__ == "__main__":
         pbar.close()
         # finished training for epoch; print train loss, output images
         print('====> total train loss\t\t(epoch {}):\t {:.4f}'.format(epoch+1, tracker["train_loss_total"][epoch].avg))
-        
+
         # validate (if classifier); this saves a checkpoint if the loss was especially good
         if (args.classifier):
-            set_mode([classifier, generator, inference_net, discriminator], "validate")
-            log_reg_run_epoch(valid_loader, classifier, "validate", epoch, args.epochs, tracker, args, generator=generator, inference_net=inference_net)
+            set_mode([classifier, generator, inference_net, discriminator, perturb_mlp], "validate")
+            log_reg_run_epoch(valid_loader, classifier, "validate", epoch, args.epochs, tracker, args, generator=generator, inference_net=inference_net, perturb_mlp=perturb_mlp)
 
     # TESTING
 
-    epoch, classifier_state, generator_state, inference_net_state, tracker, cached_args = load_checkpoint(args.out_dir, arg_str)
+    epoch, classifier_state, generator_state, inference_net_state, mlp_state, tracker, cached_args = load_checkpoint(args.out_dir, arg_str)
 
     generator.load_state_dict(generator_state)
     inference_net.load_state_dict(inference_net_state)
+    perturb_mlp.load_state_dict(mlp_state)
 
-    set_mode([classifier, generator, inference_net, discriminator], "test")
-    set_params([classifier, generator, inference_net, discriminator], [])
+    set_mode([classifier, generator, inference_net, discriminator, perturb_mlp], "test")
+    set_params([classifier, generator, inference_net, discriminator, perturb_mlp], [])
+
+    # CLASSIFIER ACCURACY
+    if (args.classifier):
+        test_log_reg_from_checkpoint(test_loader, tracker, args)
+
+    # PCA
+    if args.ali:
+        print("running PCA.")
+        means, all_utts = collect_inferences(inference_net, test_loader, args.human_cf)
+        run_pca(means, all_utts, False, []) # no tsne
+        run_pca(means, all_utts, True, [])  # yes tsne
+
+        print("finished PCA") 
 
     # HISTOGRAM
     # obtain a classifier
@@ -580,10 +617,14 @@ if __name__ == "__main__":
 
             z_inf_mu, z_inf_logvar = inference_net(x_forward_pass)
             z_inf = reparameterize(z_inf_mu, z_inf_logvar)
-            cfs = combine_x_cf(x_forward_pass, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.sample_from, generator).cpu().numpy()[:,0,...]
+            cfs = combine_x_cf(x_forward_pass, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.lrn_perturb, args.sample_from, generator, perturb_mlp).cpu().numpy()[:,0,...]
 
             for i, cf in enumerate(cfs):
-                cf_imgs = np.split(cf, TOTAL_NUM_WORLDS)
+                breakpoint()
+                if not args.lrn_perturb:
+                    cf_imgs = np.split(cf, TOTAL_NUM_WORLDS)
+                else:
+                    cf_imgs = np.split(cf, TOTAL_NUM_WORLDS, axis=1)
                 add_imgs(cf_imgs, utts[i], inf_utt_map, quick_class)
 
             # hist for true cfs (sanity check)
@@ -603,21 +644,8 @@ if __name__ == "__main__":
         print("retrived data for histograms.")
         # plot histogram data
         hist_bar_plot(inf_utt_map, "ALI", args.out_dir, train_dataset)
-        hist_bar_plot(gan_utt_map, "GAN", args.out_dir, train_dataset)
         hist_bar_plot(true_cf_utt_map, "TRUE_CF", args.out_dir, train_dataset)
+        hist_bar_plot(gan_utt_map, "GAN", args.out_dir, train_dataset)
         print("finished histograms.")
-
-    # CLASSIFIER ACCURACY
-    if (args.classifier):
-        test_log_reg_from_checkpoint(test_loader, tracker, args)
-
-    # PCA
-    if args.ali:
-        print("running PCA.")
-        means, all_utts = collect_inferences(inference_net, test_loader, args.human_cf)
-        run_pca(means, all_utts, False, []) # no tsne
-        run_pca(means, all_utts, True, [])  # yes tsne
-
-        print("finished PCA") 
 
     breakpoint()
