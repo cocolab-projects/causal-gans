@@ -641,7 +641,7 @@ if __name__ == "__main__":
             for i, cf in enumerate(cfs):
                 cf_imgs = [x_forward_pass[:,0,...][i]] + [x_gen[i] for x_gen in x_gens]
                 add_imgs(cf_imgs, utts[i], gan_utt_map, quick_class)
-        print("retrived data for histograms.")
+        print("retrieved data for histograms.")
         # plot histogram data
         hist_bar_plot(inf_utt_map, "ALI", args.out_dir, train_dataset)
         hist_bar_plot(true_cf_utt_map, "TRUE_CF", args.out_dir, train_dataset)
