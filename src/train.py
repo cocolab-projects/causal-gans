@@ -42,7 +42,6 @@ from models import (LogisticRegression, ConvGenerator, ConvDiscriminator, Infere
 from utils import (LossTracker, AverageMeter, save_checkpoint, free_params, frozen_params, to_percent, viewable_img, reparameterize, latent_cfs, args_to_string)
 
 START_INCREASE_CLASS_WT = 25
-MAX_CLASS_WT = 1.0
 SUPRESS_PRINT_STATEMENTS = True
 LOSS_KINDS = {  "causal_loss_c": lambda utt: "causal" in utt,
                 "both_nums_loss_c": lambda utt: str(NUM1) in utt and str(NUM2) in utt}
@@ -96,6 +95,7 @@ def handle_args():
     parser.add_argument("--sample_from", type=str, default="post")
     parser.add_argument("--gradual_wt", action='store_true')
     parser.add_argument("--lrn_perturb", action='store_true')
+    parser.add_argument("--class_loss_wt", type=float, default=1.0)
 
     args = parser.parse_args()
 
@@ -137,8 +137,8 @@ def update_classifier_loss_weight(classifier_loss_weight, loss_wts, args):
     loss_wts.append(classifier_loss_weight)
     np.savetxt(os.path.join(args.out_dir,"./progress_class_loss_wt.txt"), loss_wts)
 
-    if (classifier_loss_weight < MAX_CLASS_WT and args.gradual_wt and epoch > START_INCREASE_CLASS_WT):
-        return MAX_CLASS_WT*(1.0 if not args.wass else args.n_critic) / ((args.epochs-25.0)*len(train_loader))
+    if (classifier_loss_weight < args.class_loss_wt and args.gradual_wt and epoch > START_INCREASE_CLASS_WT):
+        return args.class_loss_wt*(1.0 if not args.wass else args.n_critic) / ((args.epochs-25.0)*len(train_loader))
     else: return 0.0
 
 def save_imgs_from_g(imgs, epoch, args, cfs):
@@ -360,8 +360,7 @@ def get_causal_mnist_loaders(using_gan, transform, train_on_mnist):
 def combine_x_cf(x, z_inf, z_inf_mu, z_inf_sigma, lrn_perturb, sample_from, generator, perturb_mlp):
     latent_dim = z_inf.size(1)
     if (lrn_perturb):
-        z_cf = perturb_mlp(z_inf_mu)
-        z_cf = torch.chunk(perturb_mlp(z_inf_mu), latent_dim, dim=1)
+        z_cf = torch.chunk(perturb_mlp(z_inf), latent_dim, dim=1)
         x_cf = [generator(z) for z in z_cf]
         x_to_classify = [x] + x_cf
         x_to_classify = torch.cat(x_to_classify, dim=latent_dim-1)
@@ -435,7 +434,7 @@ def hist_bar_plot(utt_map, title, out_dir, train_dataset):
     objects = tuple(train_dataset.label_nums)
     
     for i, (utt, dict_for_utt) in enumerate(utt_map.items()):
-        np.sum([*dict_for_utt.values()])
+        num_cfs = np.sum([*dict_for_utt.values()])
         utt_map[utt] = {label: count/num_cfs for label, count in dict_for_utt.items()}
 
     for i, (utt, dict_for_utt) in enumerate(utt_map.items()):
@@ -488,7 +487,7 @@ if __name__ == "__main__":
 
     print("set up models/optimizers. now training...")
 
-    if (args.classifier): classifier_loss_weight = 0.0 if args.gradual_wt else MAX_CLASS_WT
+    if (args.classifier): classifier_loss_weight = 0.0 if args.gradual_wt else args.class_loss_wt
     
     # train (and validate, if args.classifier)
     for epoch in range(args.epochs):
@@ -558,6 +557,7 @@ if __name__ == "__main__":
                     classifier_loss_weight += update_classifier_loss_weight(classifier_loss_weight, loss_wts, args)
                     optimizers.append(optimizer_c)
     
+                # for optimizer in optimizers: optimizer.zero_grad()
                 descend(optimizers, total_loss)
                 tracker.update(epoch, "train_loss_total", total_loss.item(), batch_size)
 
@@ -620,7 +620,6 @@ if __name__ == "__main__":
             cfs = combine_x_cf(x_forward_pass, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.lrn_perturb, args.sample_from, generator, perturb_mlp).cpu().numpy()[:,0,...]
 
             for i, cf in enumerate(cfs):
-                breakpoint()
                 if not args.lrn_perturb:
                     cf_imgs = np.split(cf, TOTAL_NUM_WORLDS)
                 else:
