@@ -22,6 +22,7 @@ def data_file_name(prefix, suffix):
     return os.path.realpath(file_name)
 
 def args_to_string(args):
+    string = ""
     if (args.wass):
         string += "w"
     if (args.gan):
@@ -37,6 +38,8 @@ def args_to_string(args):
     if (args.lrn_perturb):
         string += "paramterized-perturb+"
     string += "e{}+{}".format(args.epochs, args.time).replace(" ", "+")
+    if args.msg:
+        string += "+{}".format(args.msg)
     return string
 
 # UTILS: MODELS and PREPROCESSING

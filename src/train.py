@@ -55,8 +55,7 @@ def handle_args():
                         help='where to save checkpoints',default="/mnt/fs5/mmosse19/causal-gans")
     parser.add_argument('--seed', type=int, default=42,
                         help='random seed [default: 42]')
-    parser.add_argument('--resample_eps', type=float, default=1e-3,
-                        help='epsilon ball to resample z')
+    parser.add_argument('--msg', type=str, default='')
     # for learning
     parser.add_argument('--transform', action='store_false',
                         help='apply nonlinear transform to causal images')
@@ -78,6 +77,8 @@ def handle_args():
     parser.add_argument("--human_cf", action='store_true')
     parser.add_argument("--latent_dim", type=int, default=4,
                         help="dimensionality of the latent space")
+    parser.add_argument('--resample_eps', type=float, default=1e-3,
+                        help='epsilon ball to resample z')
     parser.add_argument("--sample_interval", type=int, default=500,
                         help="interval betwen image samples")
     parser.add_argument("--clip_value", type=float, default=0.01,
