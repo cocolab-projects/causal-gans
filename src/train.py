@@ -8,7 +8,7 @@ TODO: plot N(O,1) with each of four dimensions of z_cf^i for i in [4]. then do t
 TODO: add support for training with human-generated cfs
 
 @author mmosse19
-@version August 2019
+@version September 2019
 """
 # general
 import os
@@ -65,7 +65,7 @@ def handle_args():
                         help='learning rate [default: 2e-4]')
     parser.add_argument('--lr_d', type=float, default=1e-5,
                         help='discriminator learning rate [default: 1e-5]')
-    parser.add_argument('--epochs', type=int, default=51,
+    parser.add_argument('--epochs', type=int, default=501,
                         help='number of training epochs [default: 101]')
     parser.add_argument('--cuda', action='store_false',
                         help='Enable cuda')

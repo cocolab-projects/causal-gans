@@ -22,7 +22,9 @@ def data_file_name(prefix, suffix):
     return os.path.realpath(file_name)
 
 def args_to_string(args):
-    string = ""
+    string = "s{}+".format(args.seed)
+    if (args.cuda):
+        string += "cuda+"
     if (args.wass):
         string += "w"
     if (args.gan):
