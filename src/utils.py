@@ -22,7 +22,8 @@ def data_file_name(prefix, suffix):
     return os.path.realpath(file_name)
 
 def args_to_string(args):
-    string = "s{}+".format(args.seed)
+    string = "trash" if args.trash else ""
+    string += "s{}+".format(args.seed)
     if (args.cuda):
         string += "cuda+"
     if (args.wass):
@@ -33,12 +34,15 @@ def args_to_string(args):
         string += "c+"
     if (args.ali):
         string += "ali+"
+    if (args.id_on_latent):
+        string += "id_on_latent"
     if (args.cf_inf):
-        string += "cf-from-{}+".format(args.sample_from)
+        if (args.lrn_perturb):
+            string += "paramterized-perturb+"
+        else:
+            string += "cf-from-{}+".format(args.sample_from)
     if (args.human_cf):
         string += "human-cfs+"
-    if (args.lrn_perturb):
-        string += "paramterized-perturb+"
     string += "e{}+{}".format(args.epochs, args.time).replace(" ", "+")
     if args.msg:
         string += "+{}".format(args.msg)

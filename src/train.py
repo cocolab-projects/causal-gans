@@ -5,10 +5,12 @@ Much credit for GAN training goes to eriklindernoren, mhw32
 
 TODO: train with a bunnch of different classification weights; separately, set weight for GAN loss to be 0; train WGAN?ALI to completion, load from checkpoint->load them up, and then train WGAN/classifier wrt class loss;
 TODO: plot N(O,1) with each of four dimensions of z_cf^i for i in [4]. then do the same with N(0,1) replaced by N(\mu_inf, sigma_inf^2)
-TODO: add support for training with human-generated cfs
+
+TODO: plot the max over all i of |z - z_i'| (i.e., distance to furthest cf)
+TODO: perturb mean instead of samples
 
 @author mmosse19
-@version September 2019
+@version October 2019
 """
 # general
 import os
@@ -27,6 +29,7 @@ from sklearn.linear_model import LogisticRegression as SklLogReg
 
 # torch
 import torch
+import torch.nn as nn
 import torchvision.datasets as dset
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -56,6 +59,8 @@ def handle_args():
     parser.add_argument('--seed', type=int, default=42,
                         help='random seed [default: 42]')
     parser.add_argument('--msg', type=str, default='')
+    parser.add_argument('--model_src', type=str, default='')
+    parser.add_argument('--trash', action='store_true')
     # for learning
     parser.add_argument('--transform', action='store_false',
                         help='apply nonlinear transform to causal images')
@@ -85,6 +90,8 @@ def handle_args():
                         help="lower and upper clip value for disc. weights")
     parser.add_argument('--n_critic', type=int, default=1,
                         help="number of training steps for discriminator per iter")
+    parser.add_argument('--n_class', type=int, default=1,
+                        help="number of training steps for discriminator per iter")
     parser.add_argument('--wass', action='store_true',
                         help="use WGAN instead of GAN")
     parser.add_argument("--train_on_mnist", action='store_true',
@@ -96,6 +103,7 @@ def handle_args():
     parser.add_argument("--sample_from", type=str, default="post")
     parser.add_argument("--gradual_wt", action='store_true')
     parser.add_argument("--lrn_perturb", action='store_true')
+    parser.add_argument("--id_on_latent", action='store_true')
     parser.add_argument("--class_loss_wt", type=float, default=1.0)
 
     args = parser.parse_args()
@@ -123,7 +131,7 @@ def handle_args():
 
 # CHECKPOINTS AND PROGRESS WHILE TRAINING
 
-def load_checkpoint(folder, arg_str):
+def load_checkpoint(folder, arg_str=""):
     filename = 'model_best.pth.tar'
     checkpoint = torch.load(os.path.join(folder, filename))
     return checkpoint['epoch'], checkpoint['classifier_state'], checkpoint['generator_state'], checkpoint['inference_net_state'], checkpoint['perturb_mlp_state'], checkpoint['tracker'], checkpoint['cached_args']
@@ -155,11 +163,10 @@ def save_imgs_from_g(imgs, epoch, args, cfs):
 
 # TRAINING GAN (DESCENDING; COMPUTING GAN LOSS; CLIP DISCRIMINATOR; free/freeze params)
 
-def descend(optimizers, loss):
+def descend(optimizers, loss, generator = None):
     for optimizer in optimizers: optimizer.zero_grad()
     loss.backward()
     for optimizer in optimizers: optimizer.step()
-
 
 def get_loss_d(wass, discriminator, x, x_g, valid, fake, attach_inference, z_prior, z_inf):
     if (attach_inference):
@@ -265,7 +272,7 @@ def log_reg_run_all_batches(loader, model, mode, epoch, epochs, tracker, args, o
             z_inf = reparameterize(z_inf_mu, z_inf_logvar)
 
             # x_to_classify ~ q(x | cf(z_inf))
-            x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.lrn_perturb, sample_from, generator, perturb_mlp)
+            x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.lrn_perturb, sample_from, generator, perturb_mlp, args.id_on_latent)
         
         if (mode != "train"):
             with torch.no_grad():
@@ -358,10 +365,23 @@ def get_causal_mnist_loaders(using_gan, transform, train_on_mnist):
 
     return train, train_loader, valid_loader, test_loader
 
-def combine_x_cf(x, z_inf, z_inf_mu, z_inf_sigma, lrn_perturb, sample_from, generator, perturb_mlp):
+def combine_x_cf(x, z_inf, z_inf_mu, z_inf_sigma, lrn_perturb, sample_from, generator, perturb_mlp, id_on_latent):
     latent_dim = z_inf.size(1)
-    if (lrn_perturb):
-        z_cf = torch.chunk(perturb_mlp(z_inf), latent_dim, dim=1)
+    if (id_on_latent or lrn_perturb):
+        if (id_on_latent): z_cf = z_inf.repeat(1, latent_dim) 
+        elif (lrn_perturb): z_cf = perturb_mlp(z_inf)
+        z_cf = torch.chunk(z_cf, latent_dim, dim=1)
+        
+        l1 = nn.L1Loss()
+        distances = []
+        with torch.no_grad():
+            for z in z_cf:
+                distance = l1(z, z_inf)
+                distances.append(distance.item())
+        breakpoint()
+        f = open(os.path.join(args.out_dir,"./cf_distances.txt"), "a+")
+        f.write(max(distances))
+        
         x_cf = [generator(z) for z in z_cf]
         x_to_classify = [x] + x_cf
         x_to_classify = torch.cat(x_to_classify, dim=latent_dim-1)
@@ -478,6 +498,15 @@ if __name__ == "__main__":
     inference_net = InferenceNet(1, 64, args.latent_dim).to(device)
     discriminator = ConvDiscriminator(args.wass, args.train_on_mnist, args.ali, args.latent_dim).to(device)
     perturb_mlp = LatentMLP(latent_dim=args.latent_dim).to(device)
+
+    if not args.model_src == "":
+        directory = "/mnt/fs5/mmosse19/causal-gans" + "{}/".format(args.model_src)
+        epoch, classifier_state, generator_state, inference_net_state, mlp_state, tracker, cached_args = load_checkpoint(directory)
+
+        generator.load_state_dict(generator_state)
+        #inference_net.load_state_dict(inference_net_state)
+        #perturb_mlp.load_state_dict(mlp_state)
+
     loss_wts = []
     
     optimizer_g = generator.optimizer(chain(generator.parameters(),
@@ -528,7 +557,7 @@ if __name__ == "__main__":
 
             if (args.wass): clip_discriminator(discriminator)
 
-            # train generator (and classifier if necessary); TODO: execute unconditionally if GAN and periodically if WGAN
+            # train generator (and classifier if necessary)
             if batch_num % args.n_critic == 0:
 
                 set_params([generator, inference_net, classifier, discriminator, perturb_mlp], [generator, inference_net, classifier, perturb_mlp])
@@ -536,20 +565,21 @@ if __name__ == "__main__":
                 optimizers = []
 
                 if (args.gan):
-                    # x_g ~ p(x|z_prior)
-                    x_g = generator(z_prior)
-
-                    if (batch_num == 0): save_imgs_from_g(x_g, epoch, args, False)
-                    
-                    loss_g = get_loss_g(args.wass, discriminator, x, x_g, valid, args.ali, z_prior, z_inf)
-                    total_loss += loss_g
                     optimizers.append(optimizer_g)
+                    
+                    if batch_num % args.n_class == 0:
+                        # x_g ~ p(x|z_prior)
+                        x_g = generator(z_prior)
 
+                        if (batch_num == 0): save_imgs_from_g(x_g, epoch, args, False)
+
+                        loss_g = get_loss_g(args.wass, discriminator, x, x_g, valid, args.ali, z_prior, z_inf)
+                        total_loss += loss_g
                 if (args.classifier):
                     x_to_classify = x
                     if (args.cf_inf):
                         # x_to_classify ~ q(x | cf(z_inf))
-                        x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.lrn_perturb, args.sample_from, generator, perturb_mlp)
+                        x_to_classify = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.lrn_perturb, args.sample_from, generator, perturb_mlp, args.id_on_latent)
                         if (batch_num == 0): 
                             save_imgs_from_g(x_to_classify, epoch, args, True)
 
@@ -559,9 +589,8 @@ if __name__ == "__main__":
                     optimizers.append(optimizer_c)
     
                 # for optimizer in optimizers: optimizer.zero_grad()
-                descend(optimizers, total_loss)
+                descend(optimizers, total_loss, generator)
                 tracker.update(epoch, "train_loss_total", total_loss.item(), batch_size)
-
             save_losses(tracker, "train_loss_total", args)
             if (args.classifier):  save_losses(tracker, "train_loss_c", args)
             if (args.gan):  save_losses(tracker, "train_loss_d", args)
@@ -618,7 +647,7 @@ if __name__ == "__main__":
 
             z_inf_mu, z_inf_logvar = inference_net(x_forward_pass)
             z_inf = reparameterize(z_inf_mu, z_inf_logvar)
-            cfs = combine_x_cf(x_forward_pass, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.lrn_perturb, args.sample_from, generator, perturb_mlp).cpu().numpy()[:,0,...]
+            cfs = combine_x_cf(x_forward_pass, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.lrn_perturb, args.sample_from, generator, perturb_mlp, args.id_on_latent).cpu().numpy()[:,0,...]
 
             for i, cf in enumerate(cfs):
                 if not args.lrn_perturb:
