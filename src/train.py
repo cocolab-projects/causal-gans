@@ -1,7 +1,12 @@
 """
 train.py
 
-Much credit for GAN training goes to eriklindernoren, mhw32
+Credit for GAN training goes to eriklindernoren, mhw32
+
+TODO:
+    1. make sure layers look good
+    2. try supervised model
+    3. try pcfnet
 
 TODO: train with a bunnch of different classification weights; separately, set weight for GAN loss to be 0; train WGAN?ALI to completion, load from checkpoint->load them up, and then train WGAN/classifier wrt class loss;
 TODO: plot N(O,1) with each of four dimensions of z_cf^i for i in [4]. then do the same with N(0,1) replaced by N(\mu_inf, sigma_inf^2)

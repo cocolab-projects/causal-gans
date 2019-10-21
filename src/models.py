@@ -122,31 +122,33 @@ class ConvDiscriminator(nn.Module):
             nn.LeakyReLU(0.1, inplace=True)
         )
 
+        shrink_dim = 2048
+        if not train_on_mnist: shrink_dim = 8192
+        if self.supervise: shrink_dim = 40960
+
         self.shrink_layer = nn.Sequential(
-            nn.Linear(64*64*320, 1024),
+            nn.Linear(shrink_dim, 1024),
             nn.ReLU(),
-            nn.Linear(1024, 512),
+            nn.Linear(1024, 256),
             nn.ReLU(),
-            nn.Linear(512, 256),
+            nn.Linear(256, 4),
         )
         
-        dim = 2048
-        if not train_on_mnist: dim = 8192
-        if self.supervise: dim = 512
+        dim = 4
+        if self.supervise: dim = 8
 
         # The height and width of downsampled image
         self.adv_layer = nn.Sequential( 
-            nn.Linear(dim, 512),
+            nn.Linear(dim, 4),
             nn.ReLU(),
-            nn.Linear(512, 1),
+            nn.Linear(4, 1),
             nn.Sigmoid())  # note: we apply sigmoid here
 
     def forward(self, img, z=None):
-        breakpoint()
         out = self.model(img)
         out = out.view(out.shape[0], -1)
-        if self.supervise: out = self.shrink_layer(out)
-        if self.ali: torch.cat((out, z), dim=1)
+        out = self.shrink_layer(out)
+        if self.ali: out = torch.cat((out, z), dim=1)
         validity = self.adv_layer(out)
         return validity
 

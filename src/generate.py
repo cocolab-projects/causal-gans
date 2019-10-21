@@ -86,7 +86,7 @@ def img_of_world(world, num1_img, num2_img, transform):
    
     # apply nonlinear transformations; note that pixels are in interval [0,1]
     if (transform) and (world["C"] and world["cE"]):
-        top_left = warp(top_left, 1, 1)
+        top_left = warp(top_left, .9, .9)
     elif (transform):
         top_left = warp(top_left, .5, .5) # TODO: consider returning these values to .5, .5
     top_left = clamp_img(top_left, MNIST_MIN_COLOR, MNIST_MAX_COLOR)
