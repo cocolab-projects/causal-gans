@@ -6,11 +6,8 @@ Much credit for GAN training goes to eriklindernoren, mhw32
 TODO: train with a bunnch of different classification weights; separately, set weight for GAN loss to be 0; train WGAN?ALI to completion, load from checkpoint->load them up, and then train WGAN/classifier wrt class loss;
 TODO: plot N(O,1) with each of four dimensions of z_cf^i for i in [4]. then do the same with N(0,1) replaced by N(\mu_inf, sigma_inf^2)
 
-TODO: plot the max over all i of |z - z_i'| (i.e., distance to furthest cf)
-TODO: perturb mean instead of samples
-
 @author mmosse19
-@version October 2019
+@version November 2019
 """
 # general
 import os
@@ -61,7 +58,7 @@ def handle_args():
     parser.add_argument('--msg', type=str, default='')
     parser.add_argument('--model_src', type=str, default='')
     parser.add_argument('--trash', action='store_true')
-    # for learning
+    # training
     parser.add_argument('--transform', action='store_false',
                         help='apply nonlinear transform to causal images')
     parser.add_argument('--batch_size', type=int, default=64,
@@ -78,38 +75,44 @@ def handle_args():
                         help="adam: decay of first order momentum of gradient")
     parser.add_argument("--b2", type=float, default=0.999,
                         help="adam: decay of first order momentum of gradient")
-    # GAN-specific
-    parser.add_argument("--human_cf", action='store_true')
+    # classifier
+    parser.add_argument("--classifier", action='store_true')
+    parser.add_argument("--gradual_wt", action='store_true')
+    parser.add_argument("--class_loss_wt", type=float, default=1.0)
+    parser.add_argument('--n_class', type=int, default=1,
+                        help="number of training steps for discriminator per iter")
+    # latent
     parser.add_argument("--latent_dim", type=int, default=4,
                         help="dimensionality of the latent space")
     parser.add_argument('--resample_eps', type=float, default=1e-3,
                         help='epsilon ball to resample z')
+    parser.add_argument("--sample_from", type=str, default="post")
+    parser.add_argument("--lrn_perturb", action='store_true')
+    parser.add_argument("--id_on_latent", action='store_true')
+    # misc GAN-related
+    parser.add_argument("--human_cf", action='store_true')
+    parser.add_argument("--supervise", action='store_true')
     parser.add_argument("--sample_interval", type=int, default=500,
                         help="interval betwen image samples")
     parser.add_argument("--clip_value", type=float, default=0.01,
                         help="lower and upper clip value for disc. weights")
     parser.add_argument('--n_critic', type=int, default=1,
                         help="number of training steps for discriminator per iter")
-    parser.add_argument('--n_class', type=int, default=1,
-                        help="number of training steps for discriminator per iter")
     parser.add_argument('--wass', action='store_true',
                         help="use WGAN instead of GAN")
     parser.add_argument("--train_on_mnist", action='store_true',
                         help="train on MNIST instead of CMNIST")
     parser.add_argument("--gan", action='store_true')
-    parser.add_argument("--classifier", action='store_true')
     parser.add_argument("--ali", action='store_true')
     parser.add_argument("--cf_inf", action='store_true')
-    parser.add_argument("--sample_from", type=str, default="post")
-    parser.add_argument("--gradual_wt", action='store_true')
-    parser.add_argument("--lrn_perturb", action='store_true')
-    parser.add_argument("--id_on_latent", action='store_true')
-    parser.add_argument("--class_loss_wt", type=float, default=1.0)
 
     args = parser.parse_args()
 
     args.cuda = args.cuda and torch.cuda.is_available()
 
+    if args.supervise:
+        args.ali = True
+        args.wass = True
     if (args.cf_inf):
         args.classifier = True
         args.ali = True
@@ -168,27 +171,25 @@ def descend(optimizers, loss, generator = None):
     loss.backward()
     for optimizer in optimizers: optimizer.step()
 
-def get_loss_d(wass, discriminator, x, x_g, valid, fake, attach_inference, z_prior, z_inf):
-    if (attach_inference):
-        pred_fake = discriminator(x_g, z_prior)
-        pred_real = discriminator(x, z_inf)
-        return torch.mean(F.softplus(-pred_real)) + torch.mean(F.softplus(pred_fake))
-    elif (wass):
-        return -torch.mean(discriminator(x)) + torch.mean(discriminator(x_g))
+def get_adversarial_loss(disc, wass, discriminator, x_true, x_fake, ali, z_prior, z_inf):
+    if ali:
+        pred_fake = discriminator(x_fake, z_prior)
+        pred_true = discriminator(x_true, z_inf)
+        return mean_loss(disc, F.softplus(pred_fake), F.softplus(pred_true))
+    elif wass:
+        return mean_loss(disc, discriminator(x_fake), discriminator(x_true) if disc else 0)
     else:
-        real_loss = discriminator.criterion(discriminator(x), valid)
-        fake_loss = discriminator.criterion(discriminator(x_g), fake)
-        return (real_loss + fake_loss) / 2
+        valid = torch.ones(x.size(0), 1, device=device)
+        fake = torch.zeros(x.size(0), 1, device=device)
+        if disc:
+            true_loss = discriminator.criterion(discriminator(x_true), valid)
+            fake_loss = discriminator.criterion(discriminator(x_fake), fake)
+            return (true_loss + fake_loss) / 2
+        else:
+            return discriminator.criterion(discriminator(x_fake), valid)
 
-def get_loss_g(wass, discriminator, x, x_g, valid, attach_inference, z_prior, z_inf):
-    if (attach_inference):
-        pred_fake = discriminator(x_g, z_prior)
-        pred_real = discriminator(x, z_inf)
-        return torch.mean(F.softplus(pred_real)) + torch.mean(-F.softplus(pred_fake))
-    elif (wass):
-        return -torch.mean(discriminator(x_g))
-    else:
-        return discriminator.criterion(discriminator(x_g), valid)
+def mean_loss(disc, fake, true):
+    return torch.mean(true)*((-1)**disc) + torch.mean(fake)*((-1)**(not disc))
 
 def clip_discriminator(discriminator):
     for p in discriminator.parameters():
@@ -378,9 +379,8 @@ def combine_x_cf(x, z_inf, z_inf_mu, z_inf_sigma, lrn_perturb, sample_from, gene
             for z in z_cf:
                 distance = l1(z, z_inf)
                 distances.append(distance.item())
-        breakpoint()
         f = open(os.path.join(args.out_dir,"./cf_distances.txt"), "a+")
-        f.write(max(distances))
+        f.write(str(max(distances))+"\n")
         
         x_cf = [generator(z) for z in z_cf]
         x_to_classify = [x] + x_cf
@@ -496,7 +496,7 @@ if __name__ == "__main__":
 
     generator = ConvGenerator(args.latent_dim, args.wass, args.train_on_mnist).to(device)
     inference_net = InferenceNet(1, 64, args.latent_dim).to(device)
-    discriminator = ConvDiscriminator(args.wass, args.train_on_mnist, args.ali, args.latent_dim).to(device)
+    discriminator = ConvDiscriminator(args.wass, args.train_on_mnist, args.ali, args.latent_dim, args.supervise).to(device)
     perturb_mlp = LatentMLP(latent_dim=args.latent_dim).to(device)
 
     if not args.model_src == "":
@@ -527,6 +527,7 @@ if __name__ == "__main__":
         # train
         for batch_num, (x, utts, labels) in enumerate(train_loader):
             x, utts, labels = x.to(device), utts, labels.to(device)
+            if args.supervise: x_w_true_cf = x
             if not args.human_cf: x = x[...,:IMG_DIM]
 
             batch_size = x.size(0)
@@ -534,24 +535,35 @@ if __name__ == "__main__":
             if (args.gan):
                 set_params([generator, inference_net, classifier, discriminator, perturb_mlp], [discriminator])
 
-                # adversarial ground truths
-                valid = torch.ones(x.size(0), 1, device=device)
-                fake = torch.zeros(x.size(0), 1, device=device)
-
                 # z_prior ~ N(0,1)
                 z_prior = torch.randn(batch_size, args.latent_dim, device=device)
                 
-                # define q(z|x)
-                z_inf_mu, z_inf_logvar = inference_net(x)
-
-                # z_inf ~ q(z|x)
-                z_inf = reparameterize(z_inf_mu, z_inf_logvar)
-
                 # x ~ p(x | z_prior)
                 x_g = generator(z_prior)
 
+                x_true = x
+                x_fake = x_g
+                z_inf = None
+
+                if args.ali:
+                    # define q(z|x)
+                    z_inf_mu, z_inf_logvar = inference_net(x)
+
+                    # z_inf ~ q(z|x)
+                    z_inf = reparameterize(z_inf_mu, z_inf_logvar)
+
+                    if args.supervise:
+                        # in addition to x_w_true_cf, which concatenates x with true counterfactuals, we obtain and concatenate:
+                        # (1) x_g + counterfactuals from z_prior
+                        x_g_w_cf = combine_x_cf(x_g, z_prior, 0, 1, args.lrn_perturb, args.sample_from, generator, perturb_mlp, args.id_on_latent)
+                        # (2) x + counterfactuals from z_inf
+                        x_w_cf = combine_x_cf(x, z_inf, z_inf_mu, ztorch.exp(0.5*z_inf_logvar), args.lrn_perturb, args.sample_from, generator, perturb_mlp, args.id_on_latent)
+
+                        x_true = x_w_true_cf
+                        x_fake = x_g_w_cf
+
                 # train discriminator (and inference_net, if args.ali)
-                loss_d = get_loss_d(args.wass, discriminator, x, x_g, valid, fake, args.ali, z_prior, z_inf)
+                loss_d = get_adversarial_loss(True, args.wass, discriminator, x_true, x_fake, args.ali, z_prior, z_inf)
                 descend([optimizer_d], loss_d)
                 tracker.update(epoch, "train_loss_d", loss_d.item(), batch_size)
 
@@ -567,14 +579,35 @@ if __name__ == "__main__":
                 if (args.gan):
                     optimizers.append(optimizer_g)
                     
-                    if batch_num % args.n_class == 0:
-                        # x_g ~ p(x|z_prior)
-                        x_g = generator(z_prior)
+                    # x ~ p(x | z_prior)
+                    x_g = generator(z_prior)
 
+                    x_true = x
+                    x_fake = x_g
+                    z_inf = None
+
+                    if args.ali:
+                        # define q(z|x)
+                        z_inf_mu, z_inf_logvar = inference_net(x)
+
+                        # z_inf ~ q(z|x)
+                        z_inf = reparameterize(z_inf_mu, z_inf_logvar)
+
+                        if args.supervise:
+                            # in addition to x_w_true_cf, which concatenates x with true counterfactuals, we obtain and concatenate:
+                            # (1) x_g + counterfactuals from z_prior
+                            x_g_w_cf = combine_x_cf(x_g, z_prior, 0, 1, args.lrn_perturb, args.sample_from, generator, perturb_mlp, args.id_on_latent)
+                            # (2) x + counterfactuals from z_inf
+                            x_w_cf = combine_x_cf(x, z_inf, z_inf_mu, ztorch.exp(0.5*z_inf_logvar), args.lrn_perturb, args.sample_from, generator, perturb_mlp, args.id_on_latent)
+
+                            x_true = x_w_true_cf
+                            x_fake = x_g_w_cf
+                    if batch_num % args.n_class == 0:
+                        x_g = generator(z_prior)
                         if (batch_num == 0): save_imgs_from_g(x_g, epoch, args, False)
 
-                        loss_g = get_loss_g(args.wass, discriminator, x, x_g, valid, args.ali, z_prior, z_inf)
-                        total_loss += loss_g
+                        total_loss += get_adversarial_loss(False, args.wass, discriminator, x_true, x_fake, args.ali, z_prior, z_inf)
+
                 if (args.classifier):
                     x_to_classify = x
                     if (args.cf_inf):

@@ -46,7 +46,7 @@ class LogisticRegression(nn.Module):
         return torch.sigmoid(outputs)
 
 class ConvGenerator(nn.Module):
-    def __init__(self, latent_dim, wass=False, train_on_mnist=False):
+    def __init__(self, latent_dim, wass=True, train_on_mnist=False):
         super(ConvGenerator, self).__init__()
         self.optimizer = torch.optim.RMSprop if wass else torch.optim.Adam
         self.n_channels = 1
@@ -95,7 +95,7 @@ class ConvGenerator(nn.Module):
         return img
 
 class ConvDiscriminator(nn.Module):
-    def __init__(self, wass=False, train_on_mnist=False, attach_inference=False, z_dim=0):
+    def __init__(self, wass=True, train_on_mnist=False, attach_inference=False, supervise=False, z_dim=0):
         super(ConvDiscriminator, self).__init__()
 
         self.optimizer = torch.optim.RMSprop if wass else torch.optim.Adam
@@ -122,8 +122,8 @@ class ConvDiscriminator(nn.Module):
         )
         
         dim = 2048 if train_on_mnist else 8192
-        # if (attach_inference): dim += (z_dim+40)
-        
+        if (supervise): dim = 2048
+
         # The height and width of downsampled image
         self.adv_layer = nn.Sequential( 
             nn.Linear(dim, 512),
@@ -135,6 +135,7 @@ class ConvDiscriminator(nn.Module):
         out = self.model(img)
         out = out.view(out.shape[0], -1)
         if (self.attach_inference): torch.cat((out, z), dim=1)
+        breakpoint()
         validity = self.adv_layer(out)
         return validity
 
