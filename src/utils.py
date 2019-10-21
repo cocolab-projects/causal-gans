@@ -23,6 +23,19 @@ def data_file_name(prefix, suffix):
 
 def args_to_string(args):
     string = "trash" if args.trash else ""
+    if args.supervise:
+        string += "supervise+"
+    if (args.ali):
+        string += "ali+"
+    if (args.id_on_latent):
+        string += "id_on_latent+"
+    if (args.cf_inf):
+        if (args.lrn_perturb):
+            string += "paramterized-perturb+"
+        else:
+            string += "cf-from-{}+".format(args.sample_from)
+    if (args.human_cf):
+        string += "human-cfs+"
     string += "s{}+".format(args.seed)
     if (args.cuda):
         string += "cuda+"
@@ -32,17 +45,6 @@ def args_to_string(args):
         string += "g+"
     if (args.classifier):
         string += "c+"
-    if (args.ali):
-        string += "ali+"
-    if (args.id_on_latent):
-        string += "id_on_latent"
-    if (args.cf_inf):
-        if (args.lrn_perturb):
-            string += "paramterized-perturb+"
-        else:
-            string += "cf-from-{}+".format(args.sample_from)
-    if (args.human_cf):
-        string += "human-cfs+"
     string += "e{}+{}".format(args.epochs, args.time).replace(" ", "+")
     if args.msg:
         string += "+{}".format(args.msg)

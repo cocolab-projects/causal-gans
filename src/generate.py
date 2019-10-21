@@ -88,7 +88,7 @@ def img_of_world(world, num1_img, num2_img, transform):
     if (transform) and (world["C"] and world["cE"]):
         top_left = warp(top_left, 1, 1)
     elif (transform):
-        top_left = warp(top_left, .01, .01)
+        top_left = warp(top_left, .5, .5) # TODO: consider returning these values to .5, .5
     top_left = clamp_img(top_left, MNIST_MIN_COLOR, MNIST_MAX_COLOR)
 
     # put all four corner images together

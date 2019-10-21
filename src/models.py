@@ -95,13 +95,14 @@ class ConvGenerator(nn.Module):
         return img
 
 class ConvDiscriminator(nn.Module):
-    def __init__(self, wass=True, train_on_mnist=False, attach_inference=False, supervise=False, z_dim=0):
+    def __init__(self, wass=True, train_on_mnist=False, ali=False, supervise=False, z_dim=0):
         super(ConvDiscriminator, self).__init__()
 
         self.optimizer = torch.optim.RMSprop if wass else torch.optim.Adam
         self.criterion = torch.nn.BCELoss()
-        self.n_channels=1
-        self.attach_inference=attach_inference
+        self.n_channels = 1
+        self.supervise = supervise
+        self.ali = ali
         
         self.model = nn.Sequential(
             nn.Conv2d(self.n_channels, 128, 3, stride=1, padding=1),
@@ -120,9 +121,18 @@ class ConvDiscriminator(nn.Module):
             nn.BatchNorm2d(128, momentum=0.9),
             nn.LeakyReLU(0.1, inplace=True)
         )
+
+        self.shrink_layer = nn.Sequential(
+            nn.Linear(64*64*320, 1024),
+            nn.ReLU(),
+            nn.Linear(1024, 512),
+            nn.ReLU(),
+            nn.Linear(512, 256),
+        )
         
-        dim = 2048 if train_on_mnist else 8192
-        if (supervise): dim = 2048
+        dim = 2048
+        if not train_on_mnist: dim = 8192
+        if self.supervise: dim = 512
 
         # The height and width of downsampled image
         self.adv_layer = nn.Sequential( 
@@ -132,10 +142,11 @@ class ConvDiscriminator(nn.Module):
             nn.Sigmoid())  # note: we apply sigmoid here
 
     def forward(self, img, z=None):
+        breakpoint()
         out = self.model(img)
         out = out.view(out.shape[0], -1)
-        if (self.attach_inference): torch.cat((out, z), dim=1)
-        breakpoint()
+        if self.supervise: out = self.shrink_layer(out)
+        if self.ali: torch.cat((out, z), dim=1)
         validity = self.adv_layer(out)
         return validity
 

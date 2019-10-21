@@ -113,7 +113,9 @@ def handle_args():
     if args.supervise:
         args.ali = True
         args.wass = True
+        args.lrn_perturb = True
     if (args.cf_inf):
+        args.lrn_perturb = True
         args.classifier = True
         args.ali = True
         args.wass = True
@@ -171,7 +173,7 @@ def descend(optimizers, loss, generator = None):
     loss.backward()
     for optimizer in optimizers: optimizer.step()
 
-def get_adversarial_loss(disc, wass, discriminator, x_true, x_fake, ali, z_prior, z_inf):
+def get_adversarial_loss(disc, wass, discriminator, x_true, x_fake, ali, z_prior, z_inf, device):
     if ali:
         pred_fake = discriminator(x_fake, z_prior)
         pred_true = discriminator(x_true, z_inf)
@@ -555,15 +557,15 @@ if __name__ == "__main__":
                     if args.supervise:
                         # in addition to x_w_true_cf, which concatenates x with true counterfactuals, we obtain and concatenate:
                         # (1) x_g + counterfactuals from z_prior
-                        x_g_w_cf = combine_x_cf(x_g, z_prior, 0, 1, args.lrn_perturb, args.sample_from, generator, perturb_mlp, args.id_on_latent)
+                        x_g_w_cf = combine_x_cf(x_g, z_prior, torch.zeros(z_inf_mu.shape), torch.ones(z_inf_logvar.shape), args.lrn_perturb, args.sample_from, generator, perturb_mlp, args.id_on_latent)
                         # (2) x + counterfactuals from z_inf
-                        x_w_cf = combine_x_cf(x, z_inf, z_inf_mu, ztorch.exp(0.5*z_inf_logvar), args.lrn_perturb, args.sample_from, generator, perturb_mlp, args.id_on_latent)
+                        x_w_cf = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.lrn_perturb, args.sample_from, generator, perturb_mlp, args.id_on_latent)
 
                         x_true = x_w_true_cf
                         x_fake = x_g_w_cf
 
                 # train discriminator (and inference_net, if args.ali)
-                loss_d = get_adversarial_loss(True, args.wass, discriminator, x_true, x_fake, args.ali, z_prior, z_inf)
+                loss_d = get_adversarial_loss(True, args.wass, discriminator, x_true, x_fake, args.ali, z_prior, z_inf, device)
                 descend([optimizer_d], loss_d)
                 tracker.update(epoch, "train_loss_d", loss_d.item(), batch_size)
 
@@ -596,9 +598,9 @@ if __name__ == "__main__":
                         if args.supervise:
                             # in addition to x_w_true_cf, which concatenates x with true counterfactuals, we obtain and concatenate:
                             # (1) x_g + counterfactuals from z_prior
-                            x_g_w_cf = combine_x_cf(x_g, z_prior, 0, 1, args.lrn_perturb, args.sample_from, generator, perturb_mlp, args.id_on_latent)
+                            x_g_w_cf = combine_x_cf(x_g, z_prior, torch.zeros(z_inf_mu.shape), torch.ones(z_inf_logvar.shape), args.lrn_perturb, args.sample_from, generator, perturb_mlp, args.id_on_latent)
                             # (2) x + counterfactuals from z_inf
-                            x_w_cf = combine_x_cf(x, z_inf, z_inf_mu, ztorch.exp(0.5*z_inf_logvar), args.lrn_perturb, args.sample_from, generator, perturb_mlp, args.id_on_latent)
+                            x_w_cf = combine_x_cf(x, z_inf, z_inf_mu, torch.exp(0.5*z_inf_logvar), args.lrn_perturb, args.sample_from, generator, perturb_mlp, args.id_on_latent)
 
                             x_true = x_w_true_cf
                             x_fake = x_g_w_cf
@@ -606,7 +608,7 @@ if __name__ == "__main__":
                         x_g = generator(z_prior)
                         if (batch_num == 0): save_imgs_from_g(x_g, epoch, args, False)
 
-                        total_loss += get_adversarial_loss(False, args.wass, discriminator, x_true, x_fake, args.ali, z_prior, z_inf)
+                        total_loss += get_adversarial_loss(False, args.wass, discriminator, x_true, x_fake, args.ali, z_prior, z_inf, device)
 
                 if (args.classifier):
                     x_to_classify = x
